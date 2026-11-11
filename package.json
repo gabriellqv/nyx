@@ -17,7 +17,11 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --ignore-path .prettierignore --ignore-path .git/info/exclude --write .",
     "format:check": "prettier --ignore-path .prettierignore --ignore-path .git/info/exclude --check .",
-    "prepare": "husky"
+    "prepare": "husky",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f",
+    "db:reset": "docker compose down -v && docker compose up -d"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.4",

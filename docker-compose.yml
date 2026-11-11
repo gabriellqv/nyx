@@ -1,0 +1,24 @@
+name: nyx
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nyx-postgres
+    restart: unless-stopped
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nyx_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nyx_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nyx_dev}
+    volumes:
+      - nyx_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-nyx_user} -d ${POSTGRES_DB:-nyx_dev}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  nyx_postgres_data:
+    driver: local
