@@ -5,6 +5,7 @@ NYX is a financial infrastructure platform designed with a primary focus on fina
 ## Overview
 
 The platform models critical financial workflows with high reliability:
+
 - **Ledger:** Immutable double-entry bookkeeping ensuring debits and credits always balance.
 - **Transfers:** Atomic transaction processing with distributed idempotency and concurrency protection.
 - **Architecture:** Modular monolith following Clean Architecture and Domain-Driven Design principles.
@@ -45,11 +46,13 @@ nyx/
 ### Quickstart
 
 1. Install dependencies:
+
    ```bash
    pnpm install
    ```
 
 2. Start local services:
+
    ```bash
    docker compose up -d
    ```
