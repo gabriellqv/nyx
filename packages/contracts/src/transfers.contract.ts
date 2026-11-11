@@ -20,6 +20,7 @@ export const createTransferSchema = z.object({
     .string()
     .min(1, { message: 'Idempotency key is required' })
     .max(128, { message: 'Idempotency key must not exceed 128 characters' }),
+  description: z.string().max(255).optional(),
 });
 export type CreateTransferRequest = z.infer<typeof createTransferSchema>;
 
@@ -40,7 +41,21 @@ export const transferResponseSchema = z.object({
   currency: z.string().length(3),
   status: transferStatusSchema,
   idempotencyKey: z.string(),
+  description: z.string().nullable(),
+  failureReason: z.string().nullable(),
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().nullable(),
 });
 export type TransferResponse = z.infer<typeof transferResponseSchema>;
+
+/**
+ * Contract schema for requesting explicit reversal of a posted transfer.
+ */
+export const reverseTransferSchema = z.object({
+  reason: z.string().trim().min(3, { message: 'Reversal reason must be at least 3 characters' }),
+  idempotencyKey: z
+    .string()
+    .min(1, { message: 'Idempotency key is required' })
+    .max(128, { message: 'Idempotency key must not exceed 128 characters' }),
+});
+export type ReverseTransferRequest = z.infer<typeof reverseTransferSchema>;
