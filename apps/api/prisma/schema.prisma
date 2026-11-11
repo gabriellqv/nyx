@@ -14,3 +14,92 @@ model SystemHealth {
 
   @@map("system_health")
 }
+
+model Customer {
+  id             String    @id @default(uuid())
+  name           String
+  email          String    @unique
+  documentNumber String    @unique @map("document_number")
+  status         String    @default("active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  accounts       Account[]
+
+  @@map("customers")
+}
+
+model Account {
+  id            String   @id @default(uuid())
+  customerId    String   @map("customer_id")
+  accountNumber String   @unique @map("account_number")
+  currency      String   @db.VarChar(3)
+  type          String   @default("checking")
+  status        String   @default("active")
+  balance       BigInt   @default(0)
+  version       Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  customer          Customer       @relation(fields: [customerId], references: [id])
+  ledgerEntries     LedgerEntry[]
+  outgoingTransfers Transfer[]     @relation("SourceAccount")
+  incomingTransfers Transfer[]     @relation("DestinationAccount")
+
+  @@index([customerId])
+  @@index([status])
+  @@map("accounts")
+}
+
+model LedgerTransaction {
+  id            String        @id @default(uuid())
+  description   String
+  referenceType String        @map("reference_type")
+  referenceId   String?       @map("reference_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  entries       LedgerEntry[]
+
+  @@index([referenceType, referenceId])
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id             String            @id @default(uuid())
+  transactionId  String            @map("transaction_id")
+  accountId      String            @map("account_id")
+  entryType      String            @map("entry_type")
+  amount         BigInt
+  currency       String            @db.VarChar(3)
+  sequenceNumber Int               @map("sequence_number")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  transaction    LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account        Account           @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([transactionId])
+  @@map("ledger_entries")
+}
+
+model Transfer {
+  id                   String    @id @default(uuid())
+  idempotencyKey       String    @unique @map("idempotency_key")
+  sourceAccountId      String    @map("source_account_id")
+  destinationAccountId String    @map("destination_account_id")
+  amount               BigInt
+  currency             String    @db.VarChar(3)
+  status               String    @default("pending")
+  description          String?
+  failureReason        String?   @map("failure_reason")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  completedAt          DateTime? @map("completed_at")
+
+  sourceAccount        Account   @relation("SourceAccount", fields: [sourceAccountId], references: [id])
+  destinationAccount   Account   @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+
+  @@index([sourceAccountId])
+  @@index([destinationAccountId])
+  @@index([status])
+  @@map("transfers")
+}
