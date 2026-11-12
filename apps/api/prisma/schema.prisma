@@ -25,6 +25,7 @@ model Customer {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   accounts       Account[]
+  user           User?
 
   @@map("customers")
 }
@@ -102,4 +103,34 @@ model Transfer {
   @@index([destinationAccountId])
   @@index([status])
   @@map("transfers")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  role         String    @default("user")
+  customerId   String?   @unique @map("customer_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  customer     Customer? @relation(fields: [customerId], references: [id])
+
+  @@map("users")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorId      String?  @map("actor_id")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  ipAddress    String?  @map("ip_address")
+  details      String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([resourceType, resourceId])
+  @@index([actorId])
+  @@map("audit_logs")
 }
