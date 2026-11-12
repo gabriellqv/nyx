@@ -19,6 +19,7 @@ import { TRANSFER_REPOSITORY, ITransferRepository } from '../ports/transfer.repo
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { AuditService } from '../../../audit/audit.service';
+import { OutboxService } from '../../../outbox/outbox.service';
 
 interface LockedAccountRow {
   id: string;
@@ -38,6 +39,7 @@ export class ExecuteTransferUseCase {
     private readonly doubleEntryService: DoubleEntryLedgerService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   async execute(
@@ -210,6 +212,24 @@ export class ExecuteTransferUseCase {
         },
       });
 
+      // Atomically persist Outbox event for asynchronous notification
+      await this.outboxService.recordEvent(
+        {
+          eventType: 'transfer.posted',
+          aggregateType: 'transfer',
+          aggregateId: record.id,
+          payload: {
+            transferId: record.id,
+            sourceAccountId: record.sourceAccountId,
+            destinationAccountId: record.destinationAccountId,
+            amount: transferAmount.amountNumber,
+            currency: transferAmount.currency,
+            idempotencyKey: record.idempotencyKey,
+          },
+        },
+        tx,
+      );
+
       return new Transfer({
         id: record.id,
         idempotencyKey: record.idempotencyKey,
@@ -320,6 +340,7 @@ export class ReverseTransferUseCase {
     private readonly doubleEntryService: DoubleEntryLedgerService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   async execute(transferId: string, dto: ReverseTransferRequest): Promise<TransferResponse> {
@@ -427,6 +448,22 @@ export class ReverseTransferUseCase {
           completedAt: new Date(),
         },
       });
+
+      // Atomically persist Outbox event for reversal
+      await this.outboxService.recordEvent(
+        {
+          eventType: 'transfer.reversed',
+          aggregateType: 'transfer',
+          aggregateId: transfer.id,
+          payload: {
+            transferId: transfer.id,
+            reason: dto.reason,
+            amount: transfer.amount.amountNumber,
+            currency: transfer.amount.currency,
+          },
+        },
+        tx,
+      );
     });
 
     await this.auditService.record({
