@@ -6,6 +6,7 @@ import { HealthModule } from './modules/health/health.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
+import { TransfersModule } from './modules/transfers/transfers.module';
 
 /**
  * Root application module orchestrating domain modules and core infrastructure.
@@ -21,6 +22,7 @@ import { AccountsModule } from './modules/accounts/accounts.module';
     CustomersModule,
     LedgerModule,
     AccountsModule,
+    TransfersModule,
   ],
 })
 export class AppModule {}
