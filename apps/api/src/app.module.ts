@@ -11,6 +11,10 @@ import { AccountsModule } from './modules/accounts/accounts.module';
 import { TransfersModule } from './modules/transfers/transfers.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { OutboxModule } from './modules/outbox/outbox.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 /**
@@ -30,12 +34,16 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
     ]),
     PrismaModule,
     AuditModule,
+    OutboxModule,
     HealthModule,
     AuthModule,
     CustomersModule,
     LedgerModule,
     AccountsModule,
     TransfersModule,
+    PaymentsModule,
+    WebhooksModule,
+    ReconciliationModule,
   ],
   providers: [
     {
