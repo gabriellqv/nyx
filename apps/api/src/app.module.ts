@@ -3,6 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { validateEnvironment } from './config/configuration';
 import { PrismaModule } from './infrastructure/database/prisma.module';
 import { HealthModule } from './modules/health/health.module';
+import { CustomersModule } from './modules/customers/customers.module';
+import { LedgerModule } from './modules/ledger/ledger.module';
+import { AccountsModule } from './modules/accounts/accounts.module';
 
 /**
  * Root application module orchestrating domain modules and core infrastructure.
@@ -15,6 +18,9 @@ import { HealthModule } from './modules/health/health.module';
     }),
     PrismaModule,
     HealthModule,
+    CustomersModule,
+    LedgerModule,
+    AccountsModule,
   ],
 })
 export class AppModule {}
