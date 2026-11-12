@@ -14,6 +14,21 @@ jobs:
   validate:
     name: Code Quality and Build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nyx_user
+          POSTGRES_PASSWORD: nyx_password
+          POSTGRES_DB: nyx_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://nyx_user:nyx_password@localhost:5432/nyx_test?schema=public
@@ -36,6 +51,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level=critical
+
+      - name: Run Gitleaks secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
       - name: Check formatting with Prettier
         run: pnpm format:check
 
@@ -45,11 +69,17 @@ jobs:
       - name: Validate Prisma schema
         run: pnpm --filter @nyx/api exec prisma validate
 
+      - name: Run Prisma migrations
+        run: pnpm --filter @nyx/api exec prisma migrate deploy
+
       - name: Build shared packages
         run: pnpm --filter @nyx/contracts build
 
       - name: Run typecheck across monorepo
         run: pnpm typecheck
+
+      - name: Run test suite
+        run: pnpm test
 
       - name: Build applications
         run: pnpm build
