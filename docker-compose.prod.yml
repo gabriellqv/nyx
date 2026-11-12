@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nyx-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nyx_prod_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nyx_prod_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nyx_prod}
+    volumes:
+      - nyx_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-nyx_prod_user} -d ${POSTGRES_DB:-nyx_prod}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nyx-network
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    container_name: nyx-api-prod
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nyx_prod_user}:${POSTGRES_PASSWORD:-nyx_prod_password}@postgres:5432/${POSTGRES_DB:-nyx_prod}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-nyx-production-jwt-secret-min-32-chars-long!}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3001}
+    ports:
+      - '3000:3000'
+    networks:
+      - nyx-network
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+    container_name: nyx-web-prod
+    restart: always
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+    ports:
+      - '3001:3001'
+    networks:
+      - nyx-network
+
+volumes:
+  nyx_prod_data:
+    driver: local
+
+networks:
+  nyx-network:
+    driver: bridge
