@@ -4,21 +4,25 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   CreateTransferRequest,
   ReverseTransferRequest,
   TransferResponse,
+  UserProfile,
 } from '@nyx/contracts';
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Transfer } from '../../domain/entities/transfer.entity';
 import { TRANSFER_REPOSITORY, ITransferRepository } from '../ports/transfer.repository';
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
+import { AuditService } from '../../../audit/audit.service';
 
 interface LockedAccountRow {
   id: string;
+  customer_id: string;
   account_number: string;
   balance: bigint;
   currency: string;
@@ -33,9 +37,13 @@ export class ExecuteTransferUseCase {
     private readonly transferRepository: ITransferRepository,
     private readonly doubleEntryService: DoubleEntryLedgerService,
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
-  async execute(dto: CreateTransferRequest): Promise<TransferResponse> {
+  async execute(
+    dto: CreateTransferRequest,
+    currentUser?: UserProfile | undefined,
+  ): Promise<TransferResponse> {
     if (dto.sourceAccountId === dto.destinationAccountId) {
       throw new BadRequestException('Source and destination accounts must be distinct');
     }
@@ -70,13 +78,13 @@ export class ExecuteTransferUseCase {
           : [dto.destinationAccountId, dto.sourceAccountId];
 
       const firstRows = await tx.$queryRaw<LockedAccountRow[]>`
-        SELECT id, account_number, balance, currency, status, version
+        SELECT id, customer_id, account_number, balance, currency, status, version
         FROM accounts
         WHERE id = ${firstId}
         FOR UPDATE
       `;
       const secondRows = await tx.$queryRaw<LockedAccountRow[]>`
-        SELECT id, account_number, balance, currency, status, version
+        SELECT id, customer_id, account_number, balance, currency, status, version
         FROM accounts
         WHERE id = ${secondId}
         FOR UPDATE
@@ -91,6 +99,18 @@ export class ExecuteTransferUseCase {
 
       const sourceRow = firstAccount.id === dto.sourceAccountId ? firstAccount : secondAccount;
       const destRow = firstAccount.id === dto.destinationAccountId ? firstAccount : secondAccount;
+
+      // Enforce account ownership access boundary
+      if (
+        currentUser &&
+        currentUser.role !== 'admin' &&
+        currentUser.customerId &&
+        sourceRow.customer_id !== currentUser.customerId
+      ) {
+        throw new ForbiddenException(
+          'Forbidden: authenticated user is not authorized to debit this source account',
+        );
+      }
 
       // Validate account statuses
       if (sourceRow.status !== 'active') {
@@ -202,6 +222,19 @@ export class ExecuteTransferUseCase {
       });
     });
 
+    await this.auditService.record({
+      action: 'TRANSFER_POSTED',
+      resourceType: 'transfer',
+      resourceId: savedTransfer.id,
+      details: {
+        sourceAccountId: savedTransfer.sourceAccountId,
+        destinationAccountId: savedTransfer.destinationAccountId,
+        amount: savedTransfer.amount.amountNumber,
+        currency: savedTransfer.amount.currency,
+        idempotencyKey: savedTransfer.idempotencyKey,
+      },
+    });
+
     return this.toResponse(savedTransfer);
   }
 
@@ -286,6 +319,7 @@ export class ReverseTransferUseCase {
     private readonly transferRepository: ITransferRepository,
     private readonly doubleEntryService: DoubleEntryLedgerService,
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
   async execute(transferId: string, dto: ReverseTransferRequest): Promise<TransferResponse> {
@@ -393,6 +427,16 @@ export class ReverseTransferUseCase {
           completedAt: new Date(),
         },
       });
+    });
+
+    await this.auditService.record({
+      action: 'TRANSFER_REVERSED',
+      resourceType: 'transfer',
+      resourceId: transferId,
+      details: {
+        reason: dto.reason,
+        amount: transfer.amount.amountNumber,
+      },
     });
 
     const updated = await this.transferRepository.findById(transferId);

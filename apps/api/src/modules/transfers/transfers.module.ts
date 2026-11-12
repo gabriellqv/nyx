@@ -10,9 +10,10 @@ import {
 import { TransfersController } from './presentation/transfers.controller';
 import { LedgerModule } from '../ledger/ledger.module';
 import { AccountsModule } from '../accounts/accounts.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [LedgerModule, AccountsModule],
+  imports: [LedgerModule, AccountsModule, AuthModule],
   controllers: [TransfersController],
   providers: [
     {

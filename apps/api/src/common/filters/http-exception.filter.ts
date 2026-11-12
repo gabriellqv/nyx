@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { CORRELATION_ID_HEADER } from '../middleware/correlation-id.middleware';
 
 /**
  * Global exception filter ensuring uniform error response formats.
@@ -20,6 +21,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const correlationId = (request.headers[CORRELATION_ID_HEADER] as string) || undefined;
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | object = 'Internal server error';
@@ -33,7 +35,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : { message: exceptionResponse };
     } else {
       this.logger.error(
-        `Unhandled exception processing ${request.method} ${request.url}`,
+        `[${correlationId ?? 'unknown'}] Unhandled exception processing ${request.method} ${request.url}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
     }
@@ -42,6 +44,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
+      correlationId,
       ...(typeof message === 'object' ? message : { message }),
     };
 

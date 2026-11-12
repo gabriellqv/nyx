@@ -19,6 +19,7 @@ import {
 } from '../../../ledger/application/ports/ledger.repository';
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
+import { AuditService } from '../../../audit/audit.service';
 
 @Injectable()
 export class CreateAccountUseCase {
@@ -29,6 +30,7 @@ export class CreateAccountUseCase {
     private readonly customerRepository: ICustomerRepository,
     private readonly doubleEntryService: DoubleEntryLedgerService,
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
   async execute(dto: CreateAccountRequest): Promise<AccountResponse> {
@@ -115,6 +117,18 @@ export class CreateAccountUseCase {
       await this.accountRepository.save(account);
     }
 
+    await this.auditService.record({
+      action: 'ACCOUNT_CREATED',
+      resourceType: 'account',
+      resourceId: account.id,
+      details: {
+        accountNumber: account.accountNumber,
+        currency: account.currency,
+        customerId: account.customerId,
+        initialDeposit: dto.initialDeposit,
+      },
+    });
+
     return this.toResponse(account);
   }
 
@@ -193,6 +207,7 @@ export class DepositFundsUseCase {
     private readonly accountRepository: IAccountRepository,
     private readonly doubleEntryService: DoubleEntryLedgerService,
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
   async execute(accountId: string, dto: DepositRequest): Promise<AccountResponse> {
@@ -279,6 +294,17 @@ export class DepositFundsUseCase {
     if (!updatedAccount) {
       throw new NotFoundException(`Account ${accountId} not found after update`);
     }
+
+    await this.auditService.record({
+      action: 'FUNDS_DEPOSITED',
+      resourceType: 'account',
+      resourceId: accountId,
+      details: {
+        amount: depositAmount.amountNumber,
+        currency: depositAmount.currency,
+        idempotencyKey: dto.idempotencyKey,
+      },
+    });
 
     return {
       id: updatedAccount.id,

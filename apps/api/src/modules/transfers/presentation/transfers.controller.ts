@@ -8,6 +8,7 @@ import {
   HttpStatus,
   HttpCode,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import {
   createTransferSchema,
@@ -15,6 +16,7 @@ import {
   type CreateTransferRequest,
   type ReverseTransferRequest,
   type TransferResponse,
+  type UserProfile,
 } from '@nyx/contracts';
 import {
   ExecuteTransferUseCase,
@@ -22,6 +24,8 @@ import {
   ListTransfersUseCase,
   ReverseTransferUseCase,
 } from '../application/use-cases/transfer.use-cases';
+import { CurrentUser } from '../../auth/infrastructure/decorators/auth.decorators';
+import { OptionalJwtAuthGuard } from '../../auth/infrastructure/guards/jwt-auth.guard';
 
 @Controller('transfers')
 export class TransfersController {
@@ -32,14 +36,18 @@ export class TransfersController {
     private readonly reverseTransferUseCase: ReverseTransferUseCase,
   ) {}
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() body: unknown): Promise<TransferResponse> {
+  async create(
+    @Body() body: unknown,
+    @CurrentUser() user?: UserProfile,
+  ): Promise<TransferResponse> {
     const parseResult = createTransferSchema.safeParse(body);
     if (!parseResult.success) {
       throw new BadRequestException(parseResult.error.format());
     }
-    return this.executeTransferUseCase.execute(parseResult.data as CreateTransferRequest);
+    return this.executeTransferUseCase.execute(parseResult.data as CreateTransferRequest, user);
   }
 
   @Get()
