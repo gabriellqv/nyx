@@ -20,6 +20,15 @@ export class HealthController {
   }
 
   /**
+   * Liveness probe verifying the node process is active and responsive.
+   */
+  @Get('live')
+  @HttpCode(HttpStatus.OK)
+  getLiveness(): { status: string; uptime: number } {
+    return { status: 'ok', uptime: process.uptime() };
+  }
+
+  /**
    * Readiness probe for load balancers and orchestrators.
    */
   @Get('ready')

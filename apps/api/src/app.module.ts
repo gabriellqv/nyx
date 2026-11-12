@@ -15,7 +15,9 @@ import { OutboxModule } from './modules/outbox/outbox.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { ObservabilityModule } from './modules/observability/observability.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
+import { ObservabilityMiddleware } from './modules/observability/observability.middleware';
 
 /**
  * Root application module orchestrating domain modules and core infrastructure.
@@ -35,6 +37,7 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
     PrismaModule,
     AuditModule,
     OutboxModule,
+    ObservabilityModule,
     HealthModule,
     AuthModule,
     CustomersModule,
@@ -54,6 +57,6 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+    consumer.apply(CorrelationIdMiddleware, ObservabilityMiddleware).forRoutes('*');
   }
 }
