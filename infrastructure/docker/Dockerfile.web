@@ -17,6 +17,7 @@ WORKDIR /app
 COPY tsconfig.base.json ./
 COPY packages/contracts ./packages/contracts
 COPY apps/web ./apps/web
+RUN mkdir -p apps/web/public
 RUN pnpm --filter @nyx/contracts build
 RUN pnpm --filter @nyx/web build
 

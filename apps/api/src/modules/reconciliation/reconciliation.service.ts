@@ -52,7 +52,7 @@ export class ReconciliationService {
 
       const accountBalance = account.balance;
       const discrepancy = accountBalance - ledgerBalance;
-      const isBalanced = discrepancy === 0n;
+      const isBalanced = BigInt(discrepancy) === 0n;
 
       if (isBalanced) {
         balancedCount++;

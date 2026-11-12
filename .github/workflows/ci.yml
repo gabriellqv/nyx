@@ -30,7 +30,6 @@ jobs:
           --health-retries 5
 
     env:
-      NODE_ENV: test
       DATABASE_URL: postgresql://nyx_user:nyx_password@localhost:5432/nyx_test?schema=public
 
     steps:
@@ -69,6 +68,9 @@ jobs:
       - name: Validate Prisma schema
         run: pnpm --filter @nyx/api exec prisma validate
 
+      - name: Generate Prisma client
+        run: pnpm --filter @nyx/api exec prisma generate
+
       - name: Run Prisma migrations
         run: pnpm --filter @nyx/api exec prisma migrate deploy
 
@@ -80,6 +82,10 @@ jobs:
 
       - name: Run test suite
         run: pnpm test
+        env:
+          NODE_ENV: test
 
       - name: Build applications
         run: pnpm build
+        env:
+          NODE_ENV: production

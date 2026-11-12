@@ -30,6 +30,8 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+*.sarif
+results.sarif
 
 # OS files
 .DS_Store
