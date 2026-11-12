@@ -9,8 +9,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: 'var(--background)',
-        foreground: 'var(--foreground)',
+        background: 'var(--nyx-background)',
+        foreground: 'var(--nyx-text)',
+        nyx: {
+          background: '#100F1D',
+          sidebar: '#151527',
+          card: '#191B35',
+          primary: '#7963B5',
+          'primary-hover': '#8B74CC',
+          highlight: '#B8A5E8',
+          text: '#E5E0F0',
+          muted: '#9291AA',
+          border: '#302C45',
+        },
       },
     },
   },

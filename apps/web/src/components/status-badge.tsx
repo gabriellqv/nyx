@@ -13,19 +13,19 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, label }: StatusBadgeProps): React.JSX.Element {
   const statusStyles: Record<HealthStatus, { bg: string; text: string; dot: string }> = {
     ok: {
-      bg: 'bg-emerald-950/40 border-emerald-800/60',
-      text: 'text-emerald-300',
-      dot: 'bg-emerald-400',
+      bg: 'bg-nyx-card border-nyx-border',
+      text: 'text-nyx-highlight',
+      dot: 'bg-nyx-highlight',
     },
     degraded: {
-      bg: 'bg-amber-950/40 border-amber-800/60',
-      text: 'text-amber-300',
-      dot: 'bg-amber-400',
+      bg: 'bg-[#252238] border-[#4a4266]',
+      text: 'text-[#d4c7f5]',
+      dot: 'bg-[#9d84d6]',
     },
     error: {
-      bg: 'bg-rose-950/40 border-rose-800/60',
-      text: 'text-rose-300',
-      dot: 'bg-rose-400',
+      bg: 'bg-[#2a1b2e] border-[#5e2b4e]',
+      text: 'text-[#f2a8c9]',
+      dot: 'bg-[#e65c8a]',
     },
   };
 

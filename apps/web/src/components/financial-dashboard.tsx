@@ -201,16 +201,16 @@ export function FinancialDashboard(): React.JSX.Element {
     <div className="space-y-8">
       {/* Action alerts */}
       {actionMessage && (
-        <div className="p-4 rounded-md border border-zinc-700 bg-zinc-900 text-sm text-zinc-200">
+        <div className="p-4 rounded-md border border-nyx-border bg-nyx-card text-sm text-nyx-text">
           {actionMessage}
         </div>
       )}
 
       {/* Top Controls */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-nyx-border pb-6">
         <div>
-          <h2 className="text-xl font-medium text-zinc-100">Financial Ledger and Accounts</h2>
-          <p className="text-sm text-zinc-400 mt-1">
+          <h2 className="text-xl font-medium text-nyx-text">Financial Ledger and Accounts</h2>
+          <p className="text-sm text-nyx-muted mt-1">
             Real-time balance monitoring, atomic transfers, and double-entry reconciliation
           </p>
         </div>
@@ -219,7 +219,7 @@ export function FinancialDashboard(): React.JSX.Element {
             type="button"
             onClick={fetchData}
             disabled={loading}
-            className="px-3 py-1.5 rounded text-xs font-medium border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition"
+            className="px-3 py-1.5 rounded text-xs font-medium border border-nyx-border bg-nyx-sidebar hover:bg-nyx-card text-nyx-text transition"
           >
             Refresh
           </button>
@@ -228,7 +228,7 @@ export function FinancialDashboard(): React.JSX.Element {
               type="button"
               onClick={handleSeedInitialData}
               disabled={submitting}
-              className="px-3 py-1.5 rounded text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition"
+              className="px-3 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition"
             >
               Seed Sample Accounts
             </button>
@@ -238,11 +238,11 @@ export function FinancialDashboard(): React.JSX.Element {
 
       {/* Account Cards */}
       <section>
-        <h3 className="text-sm font-mono text-zinc-500 uppercase tracking-wider mb-4">
+        <h3 className="text-sm font-mono text-nyx-muted uppercase tracking-wider mb-4">
           Active Accounts ({accounts.length})
         </h3>
         {accounts.length === 0 ? (
-          <div className="p-6 rounded-lg border border-dashed border-zinc-800 text-center text-sm text-zinc-500">
+          <div className="p-6 rounded-lg border border-dashed border-nyx-border text-center text-sm text-nyx-muted">
             No accounts provisioned yet. Click &ldquo;Seed Sample Accounts&rdquo; above to start.
           </div>
         ) : (
@@ -250,29 +250,29 @@ export function FinancialDashboard(): React.JSX.Element {
             {accounts.map(acc => (
               <div
                 key={acc.id}
-                className="p-5 rounded-lg border border-zinc-800 bg-zinc-900/60 flex flex-col justify-between"
+                className="p-5 rounded-lg border border-nyx-border bg-nyx-card flex flex-col justify-between shadow-sm"
               >
                 <div>
                   <div className="flex justify-between items-start">
-                    <span className="text-xs font-mono text-zinc-400">{acc.accountNumber}</span>
+                    <span className="text-xs font-mono text-nyx-muted">{acc.accountNumber}</span>
                     <StatusBadge status="ok" label={acc.status.toUpperCase()} />
                   </div>
-                  <div className="mt-3 text-2xl font-semibold text-zinc-100">
+                  <div className="mt-3 text-2xl font-semibold text-nyx-text">
                     {formatMoney(acc.balance, acc.currency)}
                   </div>
-                  <div className="text-xs text-zinc-500 mt-1">
+                  <div className="text-xs text-nyx-muted mt-1">
                     Type: {acc.type.toUpperCase()} | Currency: {acc.currency}
                   </div>
                 </div>
-                <div className="mt-4 pt-3 border-t border-zinc-800/80 flex justify-between items-center text-xs">
+                <div className="mt-4 pt-3 border-t border-nyx-border/80 flex justify-between items-center text-xs">
                   <button
                     type="button"
                     onClick={() => handleReconcile(acc.id)}
-                    className="text-zinc-400 hover:text-zinc-200 underline"
+                    className="text-nyx-highlight hover:underline"
                   >
                     Verify Ledger
                   </button>
-                  <span className="text-zinc-600 font-mono text-[10px]">
+                  <span className="text-nyx-muted font-mono text-[10px]">
                     ID: {acc.id.slice(0, 8)}...
                   </span>
                 </div>
@@ -284,13 +284,13 @@ export function FinancialDashboard(): React.JSX.Element {
 
       {/* Reconciliation modal/card if available */}
       {reconciliationResult && (
-        <div className="p-4 rounded-lg border border-emerald-900/60 bg-emerald-950/20 text-xs text-zinc-300 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div className="p-4 rounded-lg border border-nyx-border bg-nyx-card text-xs text-nyx-text flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
-            <div className="font-semibold text-emerald-400">
+            <div className="font-semibold text-nyx-highlight">
               Ledger Reconciliation Status:{' '}
               {reconciliationResult.isReconciled ? 'BALANCED' : 'DISCREPANCY'}
             </div>
-            <div className="mt-1 text-zinc-400">
+            <div className="mt-1 text-nyx-muted">
               Account Balance: {formatMoney(reconciliationResult.accountBalance)} | Ledger
               Calculated: {formatMoney(reconciliationResult.ledgerDerivedBalance)} | Total Debits:{' '}
               {formatMoney(reconciliationResult.totalDebits)} | Total Credits:{' '}
@@ -300,7 +300,7 @@ export function FinancialDashboard(): React.JSX.Element {
           <button
             type="button"
             onClick={() => setReconciliationResult(null)}
-            className="px-2 py-1 rounded border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+            className="px-2 py-1 rounded border border-nyx-border bg-nyx-sidebar text-nyx-muted hover:text-nyx-text"
           >
             Dismiss
           </button>
@@ -310,18 +310,18 @@ export function FinancialDashboard(): React.JSX.Element {
       {/* Forms Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Transfer Form */}
-        <div className="p-6 rounded-lg border border-zinc-800 bg-zinc-900/40">
-          <h3 className="text-sm font-medium text-zinc-200 mb-4">Execute Atomic Transfer</h3>
+        <div className="p-6 rounded-lg border border-nyx-border bg-nyx-card">
+          <h3 className="text-sm font-medium text-nyx-text mb-4">Execute Atomic Transfer</h3>
           <form onSubmit={handleExecuteTransfer} className="space-y-4 text-xs">
             <div>
-              <label htmlFor="sourceAccountSelect" className="block text-zinc-400 mb-1">
+              <label htmlFor="sourceAccountSelect" className="block text-nyx-muted mb-1">
                 Source Account
               </label>
               <select
                 id="sourceAccountSelect"
                 value={sourceAccountId}
                 onChange={e => setSourceAccountId(e.target.value)}
-                className="w-full p-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500"
+                className="w-full p-2 rounded bg-nyx-sidebar border border-nyx-border text-nyx-text focus:outline-none focus:border-nyx-highlight focus:ring-1 focus:ring-nyx-highlight"
               >
                 {accounts.map(a => (
                   <option key={a.id} value={a.id}>
@@ -332,14 +332,14 @@ export function FinancialDashboard(): React.JSX.Element {
             </div>
 
             <div>
-              <label htmlFor="destAccountSelect" className="block text-zinc-400 mb-1">
+              <label htmlFor="destAccountSelect" className="block text-nyx-muted mb-1">
                 Destination Account
               </label>
               <select
                 id="destAccountSelect"
                 value={destAccountId}
                 onChange={e => setDestAccountId(e.target.value)}
-                className="w-full p-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500"
+                className="w-full p-2 rounded bg-nyx-sidebar border border-nyx-border text-nyx-text focus:outline-none focus:border-nyx-highlight focus:ring-1 focus:ring-nyx-highlight"
               >
                 {accounts.map(a => (
                   <option key={a.id} value={a.id}>
@@ -350,7 +350,7 @@ export function FinancialDashboard(): React.JSX.Element {
             </div>
 
             <div>
-              <label htmlFor="transferAmountInput" className="block text-zinc-400 mb-1">
+              <label htmlFor="transferAmountInput" className="block text-nyx-muted mb-1">
                 Amount ($ USD)
               </label>
               <input
@@ -360,14 +360,14 @@ export function FinancialDashboard(): React.JSX.Element {
                 min="0.01"
                 value={transferAmount}
                 onChange={e => setTransferAmount(e.target.value)}
-                className="w-full p-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500 font-mono"
+                className="w-full p-2 rounded bg-nyx-sidebar border border-nyx-border text-nyx-text focus:outline-none focus:border-nyx-highlight focus:ring-1 focus:ring-nyx-highlight font-mono"
               />
             </div>
 
             <button
               type="submit"
               disabled={submitting || accounts.length < 2 || sourceAccountId === destAccountId}
-              className="w-full py-2 px-4 rounded bg-zinc-100 text-zinc-900 font-medium hover:bg-zinc-200 disabled:opacity-50 transition"
+              className="w-full py-2 px-4 rounded bg-nyx-primary text-white font-medium hover:bg-nyx-primary-hover disabled:opacity-50 transition shadow-sm"
             >
               {submitting ? 'Processing Transaction...' : 'Transfer Funds'}
             </button>
@@ -375,18 +375,18 @@ export function FinancialDashboard(): React.JSX.Element {
         </div>
 
         {/* Deposit Form */}
-        <div className="p-6 rounded-lg border border-zinc-800 bg-zinc-900/40">
-          <h3 className="text-sm font-medium text-zinc-200 mb-4">Deposit Funds to Account</h3>
+        <div className="p-6 rounded-lg border border-nyx-border bg-nyx-card">
+          <h3 className="text-sm font-medium text-nyx-text mb-4">Deposit Funds to Account</h3>
           <form onSubmit={handleDepositFunds} className="space-y-4 text-xs">
             <div>
-              <label htmlFor="depositAccountSelect" className="block text-zinc-400 mb-1">
+              <label htmlFor="depositAccountSelect" className="block text-nyx-muted mb-1">
                 Target Account
               </label>
               <select
                 id="depositAccountSelect"
                 value={depositAccountId}
                 onChange={e => setDepositAccountId(e.target.value)}
-                className="w-full p-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500"
+                className="w-full p-2 rounded bg-nyx-sidebar border border-nyx-border text-nyx-text focus:outline-none focus:border-nyx-highlight focus:ring-1 focus:ring-nyx-highlight"
               >
                 {accounts.map(a => (
                   <option key={a.id} value={a.id}>
@@ -397,7 +397,7 @@ export function FinancialDashboard(): React.JSX.Element {
             </div>
 
             <div>
-              <label htmlFor="depositAmountInput" className="block text-zinc-400 mb-1">
+              <label htmlFor="depositAmountInput" className="block text-nyx-muted mb-1">
                 Deposit Amount ($ USD)
               </label>
               <input
@@ -407,14 +407,14 @@ export function FinancialDashboard(): React.JSX.Element {
                 min="0.01"
                 value={depositAmount}
                 onChange={e => setDepositAmount(e.target.value)}
-                className="w-full p-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500 font-mono"
+                className="w-full p-2 rounded bg-nyx-sidebar border border-nyx-border text-nyx-text focus:outline-none focus:border-nyx-highlight focus:ring-1 focus:ring-nyx-highlight font-mono"
               />
             </div>
 
             <button
               type="submit"
               disabled={submitting || accounts.length === 0}
-              className="w-full py-2 px-4 rounded border border-zinc-700 bg-zinc-800 text-zinc-200 font-medium hover:bg-zinc-700 disabled:opacity-50 transition"
+              className="w-full py-2 px-4 rounded border border-nyx-border bg-nyx-sidebar text-nyx-text font-medium hover:bg-nyx-card disabled:opacity-50 transition"
             >
               {submitting ? 'Crediting Account...' : 'Deposit Funds'}
             </button>
@@ -424,17 +424,17 @@ export function FinancialDashboard(): React.JSX.Element {
 
       {/* Recent Activity Table */}
       <section>
-        <h3 className="text-sm font-mono text-zinc-500 uppercase tracking-wider mb-4">
+        <h3 className="text-sm font-mono text-nyx-muted uppercase tracking-wider mb-4">
           Transfer Activity Log ({transfers.length})
         </h3>
         {transfers.length === 0 ? (
-          <div className="p-6 rounded-lg border border-dashed border-zinc-800 text-center text-sm text-zinc-500">
+          <div className="p-6 rounded-lg border border-dashed border-nyx-border text-center text-sm text-nyx-muted">
             No transfers recorded yet.
           </div>
         ) : (
-          <div className="rounded-lg border border-zinc-800 overflow-hidden">
-            <table className="w-full text-left text-xs text-zinc-300">
-              <thead className="bg-zinc-900 border-b border-zinc-800 text-zinc-500 font-mono">
+          <div className="rounded-lg border border-nyx-border overflow-hidden shadow-sm">
+            <table className="w-full text-left text-xs text-nyx-text">
+              <thead className="bg-nyx-sidebar border-b border-nyx-border text-nyx-muted font-mono">
                 <tr>
                   <th className="p-3">TRANSFER ID</th>
                   <th className="p-3">SOURCE</th>
@@ -444,13 +444,13 @@ export function FinancialDashboard(): React.JSX.Element {
                   <th className="p-3">IDEMPOTENCY KEY</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/60 bg-zinc-950 font-mono">
+              <tbody className="divide-y divide-nyx-border/60 bg-nyx-card font-mono">
                 {transfers.slice(0, 10).map(t => (
-                  <tr key={t.id} className="hover:bg-zinc-900/40">
-                    <td className="p-3 text-zinc-400">{t.id.slice(0, 8)}...</td>
+                  <tr key={t.id} className="hover:bg-nyx-sidebar/60 transition">
+                    <td className="p-3 text-nyx-muted">{t.id.slice(0, 8)}...</td>
                     <td className="p-3">{t.sourceAccountId.slice(0, 8)}...</td>
                     <td className="p-3">{t.destinationAccountId.slice(0, 8)}...</td>
-                    <td className="p-3 font-semibold text-zinc-200">
+                    <td className="p-3 font-semibold text-nyx-highlight">
                       {formatMoney(t.amount, t.currency)}
                     </td>
                     <td className="p-3">
@@ -459,7 +459,9 @@ export function FinancialDashboard(): React.JSX.Element {
                         label={t.status.toUpperCase()}
                       />
                     </td>
-                    <td className="p-3 text-zinc-500 truncate max-w-[150px]">{t.idempotencyKey}</td>
+                    <td className="p-3 text-nyx-muted truncate max-w-[150px]">
+                      {t.idempotencyKey}
+                    </td>
                   </tr>
                 ))}
               </tbody>
