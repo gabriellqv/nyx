@@ -1,0 +1,12 @@
+environment             = "staging"
+aws_region              = "us-east-1"
+project_name            = "nyx"
+vpc_cidr                = "10.0.0.0/16"
+db_instance_class       = "db.t4g.micro"
+db_allocated_storage    = 20
+backup_retention_period = 7
+multi_az                = false
+api_cpu                 = 256
+api_memory              = 512
+web_cpu                 = 256
+web_memory              = 512

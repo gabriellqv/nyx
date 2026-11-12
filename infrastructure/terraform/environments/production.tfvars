@@ -1,0 +1,12 @@
+environment             = "production"
+aws_region              = "us-east-1"
+project_name            = "nyx"
+vpc_cidr                = "10.1.0.0/16"
+db_instance_class       = "db.t4g.small"
+db_allocated_storage    = 50
+backup_retention_period = 30
+multi_az                = true
+api_cpu                 = 512
+api_memory              = 1024
+web_cpu                 = 512
+web_memory              = 1024
