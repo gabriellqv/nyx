@@ -66,6 +66,7 @@ export class PrismaTransferRepository implements ITransferRepository {
       create: {
         id: transfer.id,
         idempotencyKey: transfer.idempotencyKey,
+        requestHash: transfer.requestHash,
         sourceAccountId: transfer.sourceAccountId,
         destinationAccountId: transfer.destinationAccountId,
         amount: transfer.amount.amount,
@@ -89,6 +90,7 @@ export class PrismaTransferRepository implements ITransferRepository {
   private toDomain(record: {
     id: string;
     idempotencyKey: string;
+    requestHash: string | null;
     sourceAccountId: string;
     destinationAccountId: string;
     amount: bigint;
@@ -102,6 +104,7 @@ export class PrismaTransferRepository implements ITransferRepository {
     return new Transfer({
       id: record.id,
       idempotencyKey: record.idempotencyKey,
+      requestHash: record.requestHash,
       sourceAccountId: record.sourceAccountId,
       destinationAccountId: record.destinationAccountId,
       amount: Money.fromCents(record.amount, record.currency),

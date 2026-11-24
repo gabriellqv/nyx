@@ -40,6 +40,8 @@ describe('Reconciliation Module Integration Tests', () => {
     await prisma.payment.deleteMany();
     await prisma.auditLog.deleteMany();
     await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
+    await prisma.transferReversal.deleteMany();
+    await prisma.deposit.deleteMany();
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();

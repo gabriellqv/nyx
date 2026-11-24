@@ -38,6 +38,8 @@ describe('Payments Module Integration Tests', () => {
     await prisma.payment.deleteMany();
     await prisma.auditLog.deleteMany();
     await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
+    await prisma.transferReversal.deleteMany();
+    await prisma.deposit.deleteMany();
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();
@@ -215,6 +217,54 @@ describe('Payments Module Integration Tests', () => {
       expect(conflictRes.body.message).toContain(
         'already exists with different payment parameters',
       );
+    });
+
+    it('should include payment method and description when checking idempotency', async () => {
+      const idempotencyKey = randomUUID();
+      const payload = {
+        destinationAccountId: accountId,
+        amount: 3000,
+        currency: 'USD',
+        method: 'pix' as const,
+        idempotencyKey,
+        description: 'First payment description',
+      };
+
+      await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(payload)
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...payload, method: 'bank_transfer', description: 'Changed payment' })
+        .expect(409);
+    });
+
+    it('should return the same payment for concurrent retries with one idempotency key', async () => {
+      const payload = {
+        destinationAccountId: accountId,
+        amount: 2000,
+        currency: 'USD',
+        method: 'pix',
+        idempotencyKey: randomUUID(),
+      };
+
+      const responses = await Promise.all(
+        Array.from({ length: 2 }, () =>
+          request(app.getHttpServer())
+            .post('/payments')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send(payload),
+        ),
+      );
+
+      expect(responses.map(response => response.status)).toEqual([201, 201]);
+      expect(responses[0]?.body.id).toBe(responses[1]?.body.id);
+      const account = await prisma.account.findUnique({ where: { id: accountId } });
+      expect(account?.balance).toBe(12000n);
     });
   });
 

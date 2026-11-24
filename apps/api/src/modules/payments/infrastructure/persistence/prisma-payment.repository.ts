@@ -33,6 +33,7 @@ export class PrismaPaymentRepository implements IPaymentRepository {
       create: {
         id: payment.id,
         idempotencyKey: payment.idempotencyKey,
+        requestHash: payment.requestHash,
         destinationAccountId: payment.destinationAccountId,
         amount: payment.amount.amount,
         currency: payment.amount.currency,
@@ -54,6 +55,7 @@ export class PrismaPaymentRepository implements IPaymentRepository {
   private toDomain(raw: {
     id: string;
     idempotencyKey: string;
+    requestHash: string | null;
     destinationAccountId: string;
     amount: bigint;
     currency: string;
@@ -66,6 +68,7 @@ export class PrismaPaymentRepository implements IPaymentRepository {
     return new Payment({
       id: raw.id,
       idempotencyKey: raw.idempotencyKey,
+      requestHash: raw.requestHash,
       destinationAccountId: raw.destinationAccountId,
       amount: Money.fromCents(raw.amount, raw.currency),
       method: raw.method as PaymentMethod,

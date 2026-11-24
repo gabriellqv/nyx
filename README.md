@@ -29,7 +29,7 @@ Transfers run inside a single database transaction and lock the affected account
 
 ### Idempotency
 
-`/transfers`, `/accounts/:id/deposit`, and `/payments` require an `idempotencyKey`. Keys and their responses are stored, so a retried request returns the original result instead of moving money twice. This matters because network retries are normal, not exceptional.
+`/transfers`, `/accounts/:id/deposit`, `/payments`, and transfer reversals require an `idempotencyKey`. The operation and a SHA-256 fingerprint of its canonical request are committed with the financial posting. Retries return the original result, while reuse of a key with different parameters is rejected. A transfer can have at most one reversal.
 
 ### Transactional outbox
 
