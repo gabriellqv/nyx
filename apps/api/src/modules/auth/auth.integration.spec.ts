@@ -38,6 +38,8 @@ describe('Auth, Security, and Audit Integration Tests', () => {
     await prisma.auditLog.deleteMany();
     await prisma.user.deleteMany();
     await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
+    await prisma.transferReversal.deleteMany();
+    await prisma.deposit.deleteMany();
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();
@@ -376,6 +378,53 @@ describe('Auth, Security, and Audit Integration Tests', () => {
           idempotencyKey: randomUUID(),
         })
         .expect(403);
+    });
+
+    it('should apply a deposit once across concurrent and sequential retries', async () => {
+      const idempotencyKey = randomUUID();
+      const deposit = {
+        amount: 1000,
+        idempotencyKey,
+        description: 'Test deposit',
+      };
+
+      const concurrentResponses = await Promise.all(
+        Array.from({ length: 2 }, () =>
+          request(app.getHttpServer())
+            .post(`/accounts/${accountAId}/deposit`)
+            .set('Authorization', `Bearer ${tokenAdmin}`)
+            .send(deposit),
+        ),
+      );
+      expect(concurrentResponses.map(response => response.status)).toEqual([200, 200]);
+
+      const retry = await request(app.getHttpServer())
+        .post(`/accounts/${accountAId}/deposit`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(deposit)
+        .expect(200);
+
+      expect(concurrentResponses[0]?.body.balance).toBe(concurrentResponses[1]?.body.balance);
+      expect(retry.body.balance).toBe(concurrentResponses[0]?.body.balance);
+      const account = await prisma.account.findUnique({ where: { id: accountAId } });
+      expect(account?.balance).toBe(101000n);
+      expect(await prisma.ledgerEntry.count({ where: { accountId: accountAId } })).toBe(1);
+    });
+
+    it('should reject reuse of a deposit idempotency key with a different request', async () => {
+      const idempotencyKey = randomUUID();
+
+      await request(app.getHttpServer())
+        .post(`/accounts/${accountAId}/deposit`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ amount: 1000, idempotencyKey })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/accounts/${accountAId}/deposit`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ amount: 2000, idempotencyKey })
+        .expect(409);
     });
 
     it('should restrict administrative financial endpoints by role', async () => {

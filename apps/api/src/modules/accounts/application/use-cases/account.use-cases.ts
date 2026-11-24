@@ -1,4 +1,10 @@
-import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   CreateAccountRequest,
@@ -22,6 +28,7 @@ import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { AuditService } from '../../../audit/audit.service';
 import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
+import { hashRequest } from '../../../common/application/request-hash';
 
 @Injectable()
 export class CreateAccountUseCase {
@@ -230,105 +237,173 @@ export class DepositFundsUseCase {
       throw new NotFoundException(`Account with id "${accountId}" was not found`);
     }
 
+    const depositAmount = Money.fromCents(dto.amount, account.currency);
+    const requestHash = hashRequest({
+      accountId,
+      amount: dto.amount,
+      currency: account.currency,
+      description: dto.description ?? null,
+    });
+
+    const replayDeposit = async (record: {
+      requestHash: string;
+      responseBody: string;
+    }): Promise<AccountResponse> => {
+      if (record.requestHash !== requestHash) {
+        throw new ConflictException('Idempotency key was reused with different deposit parameters');
+      }
+      return JSON.parse(record.responseBody) as AccountResponse;
+    };
+
+    const existingDeposit = await this.prisma.deposit.findUnique({
+      where: { idempotencyKey: dto.idempotencyKey },
+    });
+    if (existingDeposit) {
+      return replayDeposit(existingDeposit);
+    }
+
     if (!account.isActive()) {
       throw new BadRequestException(`Account is ${account.status} and cannot receive deposits`);
     }
 
-    const depositAmount = Money.fromCents(dto.amount, account.currency);
-
-    await this.prisma.$transaction(async tx => {
-      // Row level lock on account to prevent concurrent modifications
-      const [lockedAccount] = await tx.$queryRaw<
-        Array<{ id: string; balance: bigint; version: number }>
-      >`
-        SELECT id, balance, version FROM accounts WHERE id = ${accountId} FOR UPDATE
+    let transactionResult: { response: AccountResponse; replayed: boolean };
+    try {
+      transactionResult = await this.prisma.$transaction(async tx => {
+        // Row level lock on account to prevent concurrent modifications
+        const [lockedAccount] = await tx.$queryRaw<
+          Array<{ id: string; balance: bigint; version: number; status: string }>
+        >`
+        SELECT id, balance, version, status FROM accounts WHERE id = ${accountId} FOR UPDATE
       `;
 
-      if (!lockedAccount) {
-        throw new NotFoundException(`Account with id "${accountId}" not found`);
-      }
+        if (!lockedAccount) {
+          throw new NotFoundException(`Account with id "${accountId}" not found`);
+        }
 
-      const newBalance = lockedAccount.balance + depositAmount.amount;
+        const priorDeposit = await tx.deposit.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+        });
+        if (priorDeposit) {
+          return { response: await replayDeposit(priorDeposit), replayed: true };
+        }
 
-      await tx.account.update({
-        where: { id: accountId },
-        data: {
-          balance: newBalance,
-          version: lockedAccount.version + 1,
-          updatedAt: new Date(),
-        },
-      });
+        if (lockedAccount.status !== 'active') {
+          throw new BadRequestException(
+            `Account is ${lockedAccount.status} and cannot receive deposits`,
+          );
+        }
 
-      const cashClearing = await tx.ledgerAccount.upsert({
-        where: { code_currency: { code: 'cash-clearing', currency: account.currency } },
-        create: {
-          id: randomUUID(),
-          code: 'cash-clearing',
-          name: 'Manual cash deposit clearing',
-          currency: account.currency,
-          accountType: 'asset',
-        },
-        update: {},
-      });
+        const newBalance = lockedAccount.balance + depositAmount.amount;
 
-      const ledgerTx = this.doubleEntryService.createTransaction({
-        description: dto.description ?? `Deposit to ${account.accountNumber}`,
-        referenceType: 'deposit',
-        referenceId: account.id,
-        entries: [
-          { ledgerAccountId: cashClearing.id, entryType: 'debit', amount: depositAmount },
-          { accountId: account.id, entryType: 'credit', amount: depositAmount },
-        ],
-      });
-
-      await tx.ledgerTransaction.create({
-        data: {
-          id: ledgerTx.id,
-          description: ledgerTx.description,
-          referenceType: ledgerTx.referenceType,
-          referenceId: ledgerTx.referenceId,
-          entries: {
-            create: ledgerTx.entries.map(e => ({
-              id: e.id,
-              accountId: e.accountId,
-              ledgerAccountId: e.ledgerAccountId,
-              entryType: e.entryType,
-              amount: e.amount.amount,
-              currency: e.amount.currency,
-              sequenceNumber: e.sequenceNumber,
-            })),
+        const updatedAccount = await tx.account.update({
+          where: { id: accountId },
+          data: {
+            balance: newBalance,
+            version: lockedAccount.version + 1,
+            updatedAt: new Date(),
           },
-        },
-      });
-    });
+        });
 
-    const updatedAccount = await this.accountRepository.findById(accountId);
-    if (!updatedAccount) {
-      throw new NotFoundException(`Account ${accountId} not found after update`);
+        const cashClearing = await tx.ledgerAccount.upsert({
+          where: { code_currency: { code: 'cash-clearing', currency: account.currency } },
+          create: {
+            id: randomUUID(),
+            code: 'cash-clearing',
+            name: 'Manual cash deposit clearing',
+            currency: account.currency,
+            accountType: 'asset',
+          },
+          update: {},
+        });
+
+        const ledgerTx = this.doubleEntryService.createTransaction({
+          description: dto.description ?? `Deposit to ${account.accountNumber}`,
+          referenceType: 'deposit',
+          referenceId: account.id,
+          entries: [
+            { ledgerAccountId: cashClearing.id, entryType: 'debit', amount: depositAmount },
+            { accountId: account.id, entryType: 'credit', amount: depositAmount },
+          ],
+        });
+
+        await tx.ledgerTransaction.create({
+          data: {
+            id: ledgerTx.id,
+            description: ledgerTx.description,
+            referenceType: ledgerTx.referenceType,
+            referenceId: ledgerTx.referenceId,
+            entries: {
+              create: ledgerTx.entries.map(e => ({
+                id: e.id,
+                accountId: e.accountId,
+                ledgerAccountId: e.ledgerAccountId,
+                entryType: e.entryType,
+                amount: e.amount.amount,
+                currency: e.amount.currency,
+                sequenceNumber: e.sequenceNumber,
+              })),
+            },
+          },
+        });
+
+        const response: AccountResponse = {
+          id: updatedAccount.id,
+          customerId: updatedAccount.customerId,
+          accountNumber: updatedAccount.accountNumber,
+          currency: updatedAccount.currency,
+          type: updatedAccount.type as AccountResponse['type'],
+          status: updatedAccount.status as AccountResponse['status'],
+          balance: Number(updatedAccount.balance),
+          createdAt: updatedAccount.createdAt.toISOString(),
+          updatedAt: updatedAccount.updatedAt.toISOString(),
+        };
+
+        await tx.deposit.create({
+          data: {
+            id: randomUUID(),
+            idempotencyKey: dto.idempotencyKey,
+            requestHash,
+            accountId,
+            amount: depositAmount.amount,
+            currency: depositAmount.currency,
+            description: dto.description ?? null,
+            responseBody: JSON.stringify(response),
+          },
+        });
+
+        return { response, replayed: false };
+      });
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'P2002'
+      ) {
+        const racedDeposit = await this.prisma.deposit.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+        });
+        if (racedDeposit) {
+          return replayDeposit(racedDeposit);
+        }
+      }
+      throw error;
     }
 
-    await this.auditService.record({
-      action: 'FUNDS_DEPOSITED',
-      resourceType: 'account',
-      resourceId: accountId,
-      details: {
-        amount: depositAmount.amountNumber,
-        currency: depositAmount.currency,
-        idempotencyKey: dto.idempotencyKey,
-      },
-    });
+    if (!transactionResult.replayed) {
+      await this.auditService.record({
+        action: 'FUNDS_DEPOSITED',
+        resourceType: 'account',
+        resourceId: accountId,
+        details: {
+          amount: depositAmount.amountNumber,
+          currency: depositAmount.currency,
+          idempotencyKey: dto.idempotencyKey,
+        },
+      });
+    }
 
-    return {
-      id: updatedAccount.id,
-      customerId: updatedAccount.customerId,
-      accountNumber: updatedAccount.accountNumber,
-      currency: updatedAccount.currency,
-      type: updatedAccount.type,
-      status: updatedAccount.status,
-      balance: updatedAccount.balance.amountNumber,
-      createdAt: updatedAccount.createdAt.toISOString(),
-      updatedAt: updatedAccount.updatedAt.toISOString(),
-    };
+    return transactionResult.response;
   }
 }
 

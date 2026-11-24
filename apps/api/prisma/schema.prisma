@@ -44,6 +44,7 @@ model Account {
 
   customer          Customer       @relation(fields: [customerId], references: [id])
   ledgerEntries     LedgerEntry[]
+  deposits          Deposit[]
   outgoingTransfers Transfer[]     @relation("SourceAccount")
   incomingTransfers Transfer[]     @relation("DestinationAccount")
   payments          Payment[]
@@ -105,6 +106,7 @@ model LedgerEntry {
 model Transfer {
   id                   String    @id @default(uuid())
   idempotencyKey       String    @unique @map("idempotency_key")
+  requestHash          String?   @map("request_hash")
   sourceAccountId      String    @map("source_account_id")
   destinationAccountId String    @map("destination_account_id")
   amount               BigInt
@@ -117,11 +119,42 @@ model Transfer {
 
   sourceAccount        Account   @relation("SourceAccount", fields: [sourceAccountId], references: [id])
   destinationAccount   Account   @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  reversal              TransferReversal?
 
   @@index([sourceAccountId])
   @@index([destinationAccountId])
   @@index([status])
   @@map("transfers")
+}
+
+model TransferReversal {
+  id             String   @id @default(uuid())
+  transferId     String   @unique @map("transfer_id")
+  idempotencyKey String   @unique @map("idempotency_key")
+  requestHash    String   @map("request_hash")
+  reason         String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  transfer Transfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
+
+  @@map("transfer_reversals")
+}
+
+model Deposit {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique @map("idempotency_key")
+  requestHash    String   @map("request_hash")
+  accountId      String   @map("account_id")
+  amount         BigInt
+  currency       String   @db.VarChar(3)
+  description    String?
+  responseBody   String   @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt])
+  @@map("deposits")
 }
 
 model User {
@@ -214,6 +247,7 @@ model WebhookDelivery {
 model Payment {
   id                   String    @id @default(uuid())
   idempotencyKey       String    @unique @map("idempotency_key")
+  requestHash          String?   @map("request_hash")
   destinationAccountId String    @map("destination_account_id")
   amount               BigInt
   currency             String    @db.VarChar(3)

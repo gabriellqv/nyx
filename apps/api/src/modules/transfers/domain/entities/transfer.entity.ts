@@ -8,6 +8,7 @@ export type TransferStatus = 'pending' | 'posted' | 'failed' | 'reversed';
 export class Transfer {
   readonly id: string;
   readonly idempotencyKey: string;
+  readonly requestHash: string | null;
   readonly sourceAccountId: string;
   readonly destinationAccountId: string;
   readonly amount: Money;
@@ -20,6 +21,7 @@ export class Transfer {
   constructor(params: {
     id: string;
     idempotencyKey: string;
+    requestHash?: string | null | undefined;
     sourceAccountId: string;
     destinationAccountId: string;
     amount: Money;
@@ -31,6 +33,7 @@ export class Transfer {
   }) {
     this.id = params.id;
     this.idempotencyKey = params.idempotencyKey;
+    this.requestHash = params.requestHash ?? null;
     this.sourceAccountId = params.sourceAccountId;
     this.destinationAccountId = params.destinationAccountId;
     this.amount = params.amount;

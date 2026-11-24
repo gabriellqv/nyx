@@ -39,6 +39,9 @@ describe('Financial Domain Integration Tests', () => {
   beforeEach(async () => {
     // Clear financial tables in correct dependency order
     await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
+    await prisma.transferReversal.deleteMany();
+    await prisma.deposit.deleteMany();
+    await prisma.payment.deleteMany();
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();
@@ -323,6 +326,54 @@ describe('Financial Domain Integration Tests', () => {
         })
         .expect(409);
     });
+
+    it('should return the original transfer for concurrent retries with the same key', async () => {
+      const payload = {
+        sourceAccountId: accountAId,
+        destinationAccountId: accountBId,
+        amount: 10000,
+        currency: 'USD',
+        idempotencyKey: randomUUID(),
+      };
+
+      const responses = await Promise.all(
+        Array.from({ length: 2 }, () =>
+          request(app.getHttpServer())
+            .post('/transfers')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send(payload),
+        ),
+      );
+
+      expect(responses.map(response => response.status)).toEqual([201, 201]);
+      expect(responses[0]?.body.id).toBe(responses[1]?.body.id);
+      const account = await prisma.account.findUnique({ where: { id: accountAId } });
+      expect(account?.balance).toBe(90000n);
+    });
+
+    it('should include the full transfer request when checking idempotency', async () => {
+      const idempotencyKey = randomUUID();
+      const requestBody = {
+        sourceAccountId: accountAId,
+        destinationAccountId: accountBId,
+        amount: 10000,
+        currency: 'USD',
+        idempotencyKey,
+        description: 'First description',
+      };
+
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(requestBody)
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...requestBody, description: 'Changed description' })
+        .expect(409);
+    });
   });
 
   describe('4. Transfer Reversal Behavior', () => {
@@ -371,6 +422,88 @@ describe('Financial Domain Integration Tests', () => {
 
       expect(reversalTx).toBeDefined();
       expect(reversalTx?.entries).toHaveLength(2);
+    });
+
+    it('should process concurrent requests to reverse a transfer only once', async () => {
+      const transferRes = await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          idempotencyKey: randomUUID(),
+          sourceAccountId: accountAId,
+          destinationAccountId: accountBId,
+          amount: 5000,
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const reverseRequest = {
+        reason: 'Concurrent cancellation',
+        idempotencyKey: randomUUID(),
+      };
+      const responses = await Promise.all(
+        Array.from({ length: 2 }, () =>
+          request(app.getHttpServer())
+            .post(`/transfers/${transferRes.body.id}/reverse`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send(reverseRequest),
+        ),
+      );
+
+      expect(responses.map(response => response.status)).toEqual([200, 200]);
+      expect(responses[0]?.body.id).toBe(responses[1]?.body.id);
+      expect(
+        await prisma.ledgerTransaction.count({
+          where: { referenceType: 'reversal', referenceId: transferRes.body.id },
+        }),
+      ).toBe(1);
+
+      const accountA = await prisma.account.findUnique({ where: { id: accountAId } });
+      const accountB = await prisma.account.findUnique({ where: { id: accountBId } });
+      expect(accountA?.balance).toBe(100000n);
+      expect(accountB?.balance).toBe(20000n);
+    });
+
+    it('should return the original reversal for an idempotent retry', async () => {
+      const transferRes = await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          idempotencyKey: randomUUID(),
+          sourceAccountId: accountAId,
+          destinationAccountId: accountBId,
+          amount: 5000,
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const reverseRequest = {
+        reason: 'Idempotent cancellation',
+        idempotencyKey: randomUUID(),
+      };
+      const first = await request(app.getHttpServer())
+        .post(`/transfers/${transferRes.body.id}/reverse`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(reverseRequest)
+        .expect(200);
+      const retry = await request(app.getHttpServer())
+        .post(`/transfers/${transferRes.body.id}/reverse`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(reverseRequest)
+        .expect(200);
+
+      expect(retry.body.id).toBe(first.body.id);
+      expect(
+        await prisma.ledgerTransaction.count({
+          where: { referenceType: 'reversal', referenceId: transferRes.body.id },
+        }),
+      ).toBe(1);
+
+      await request(app.getHttpServer())
+        .post(`/transfers/${transferRes.body.id}/reverse`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...reverseRequest, reason: 'Changed reversal reason' })
+        .expect(409);
     });
   });
 

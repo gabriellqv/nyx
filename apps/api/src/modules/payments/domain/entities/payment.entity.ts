@@ -4,6 +4,7 @@ import type { PaymentMethod, PaymentStatus } from '@nyx/contracts';
 export interface PaymentProps {
   id: string;
   idempotencyKey: string;
+  requestHash?: string | null | undefined;
   destinationAccountId: string;
   amount: Money;
   method: PaymentMethod;
@@ -16,6 +17,7 @@ export interface PaymentProps {
 export class Payment {
   private readonly _id: string;
   private readonly _idempotencyKey: string;
+  private readonly _requestHash: string | null;
   private readonly _destinationAccountId: string;
   private readonly _amount: Money;
   private readonly _method: PaymentMethod;
@@ -27,6 +29,7 @@ export class Payment {
   constructor(props: PaymentProps) {
     this._id = props.id;
     this._idempotencyKey = props.idempotencyKey;
+    this._requestHash = props.requestHash ?? null;
     this._destinationAccountId = props.destinationAccountId;
     this._amount = props.amount;
     this._method = props.method;
@@ -42,6 +45,10 @@ export class Payment {
 
   get idempotencyKey(): string {
     return this._idempotencyKey;
+  }
+
+  get requestHash(): string | null {
+    return this._requestHash;
   }
 
   get destinationAccountId(): string {
