@@ -6,7 +6,12 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { CreatePaymentRequest, PaymentResponse, UserProfile } from '@nyx/contracts';
+import type {
+  CreatePaymentRequest,
+  PaymentResponse,
+  PaymentPageResponse,
+  UserProfile,
+} from '@nyx/contracts';
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Payment } from '../../domain/entities/payment.entity';
 import { PAYMENT_REPOSITORY, IPaymentRepository } from '../ports/payment.repository';
@@ -17,6 +22,7 @@ import { assertCanReadCustomer } from '../../../auth/application/policies/resour
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { hashRequest, isUniqueConstraintError } from '../../../common/application/request-hash';
 import { AuditRequestContext } from '../../../audit/audit.service';
+import type { CursorPagination } from '../../../common/application/cursor-pagination';
 
 interface LockedAccountRow {
   id: string;
@@ -74,7 +80,7 @@ export class ProcessPaymentUseCase {
       );
     }
 
-    const paymentAmount = Money.fromCents(dto.amount, dto.currency);
+    const paymentAmount = Money.fromMinorUnits(dto.amount, dto.currency);
     const paymentId = randomUUID();
 
     // 2. Process payment atomically inside database transaction
@@ -106,7 +112,7 @@ export class ProcessPaymentUseCase {
             idempotencyKey: duplicate.idempotencyKey,
             requestHash: duplicate.requestHash,
             destinationAccountId: duplicate.destinationAccountId,
-            amount: Money.fromCents(duplicate.amount, duplicate.currency),
+            amount: Money.fromMinorUnits(duplicate.amount, duplicate.currency),
             method: duplicate.method as CreatePaymentRequest['method'],
             status: duplicate.status as 'completed' | 'failed' | 'pending',
             description: duplicate.description,
@@ -133,7 +139,7 @@ export class ProcessPaymentUseCase {
           );
         }
 
-        const currentBalance = Money.fromCents(accountRow.balance, accountRow.currency);
+        const currentBalance = Money.fromMinorUnits(accountRow.balance, accountRow.currency);
         const updatedBalance = currentBalance.add(paymentAmount);
 
         // Update account balance
@@ -210,7 +216,7 @@ export class ProcessPaymentUseCase {
             payload: {
               paymentId,
               destinationAccountId: accountRow.id,
-              amount: paymentAmount.amountNumber,
+              amount: paymentAmount.amount.toString(),
               currency: paymentAmount.currency,
               method: dto.method,
               idempotencyKey: dto.idempotencyKey,
@@ -227,7 +233,7 @@ export class ProcessPaymentUseCase {
             resourceId: paymentId,
             details: {
               destinationAccountId: accountRow.id,
-              amount: paymentAmount.amountNumber,
+              amount: paymentAmount.amount.toString(),
               currency: paymentAmount.currency,
               method: dto.method,
               idempotencyKey: dto.idempotencyKey,
@@ -273,7 +279,7 @@ export class ProcessPaymentUseCase {
     return {
       id: payment.id,
       destinationAccountId: payment.destinationAccountId,
-      amount: payment.amount.amountNumber,
+      amount: payment.amount.amount.toString(),
       currency: payment.amount.currency,
       method: payment.method,
       status: payment.status,
@@ -311,7 +317,7 @@ export class GetPaymentUseCase {
     return {
       id: payment.id,
       destinationAccountId: payment.destinationAccountId,
-      amount: payment.amount.amountNumber,
+      amount: payment.amount.amount.toString(),
       currency: payment.amount.currency,
       method: payment.method,
       status: payment.status,
@@ -331,7 +337,11 @@ export class ListPaymentsUseCase {
     private readonly prisma: PrismaService,
   ) {}
 
-  async execute(accountId: string, currentUser: UserProfile): Promise<PaymentResponse[]> {
+  async execute(
+    accountId: string,
+    currentUser: UserProfile,
+    pagination: CursorPagination,
+  ): Promise<PaymentPageResponse> {
     const account = await this.prisma.account.findUnique({
       where: { id: accountId },
       select: { customerId: true },
@@ -341,18 +351,21 @@ export class ListPaymentsUseCase {
     }
     assertCanReadCustomer(currentUser, account.customerId);
 
-    const payments = await this.paymentRepository.findByAccountId(accountId);
-    return payments.map(payment => ({
-      id: payment.id,
-      destinationAccountId: payment.destinationAccountId,
-      amount: payment.amount.amountNumber,
-      currency: payment.amount.currency,
-      method: payment.method,
-      status: payment.status,
-      idempotencyKey: payment.idempotencyKey,
-      description: payment.description,
-      createdAt: payment.createdAt.toISOString(),
-      completedAt: payment.completedAt ? payment.completedAt.toISOString() : null,
-    }));
+    const page = await this.paymentRepository.findByAccountId(accountId, pagination);
+    return {
+      ...page,
+      items: page.items.map(payment => ({
+        id: payment.id,
+        destinationAccountId: payment.destinationAccountId,
+        amount: payment.amount.amount.toString(),
+        currency: payment.amount.currency,
+        method: payment.method,
+        status: payment.status,
+        idempotencyKey: payment.idempotencyKey,
+        description: payment.description,
+        createdAt: payment.createdAt.toISOString(),
+        completedAt: payment.completedAt ? payment.completedAt.toISOString() : null,
+      })),
+    };
   }
 }

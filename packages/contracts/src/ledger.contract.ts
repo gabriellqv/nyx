@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  positiveMinorUnitStringSchema,
+  nonNegativeMinorUnitStringSchema,
+  signedMinorUnitStringSchema,
+} from './money.contract';
 
 /**
  * Entry type classification in double-entry bookkeeping.
@@ -27,7 +32,7 @@ export const ledgerEntryResponseSchema = z.object({
   accountId: z.string().uuid().nullable(),
   ledgerAccountId: z.string().uuid().nullable().optional(),
   entryType: ledgerEntryTypeSchema,
-  amount: z.number().int().positive(),
+  amount: positiveMinorUnitStringSchema,
   currency: z.string().length(3),
   sequenceNumber: z.number().int(),
   createdAt: z.string().datetime(),
@@ -52,11 +57,11 @@ export type LedgerTransactionResponse = z.infer<typeof ledgerTransactionResponse
  */
 export const ledgerReconciliationResponseSchema = z.object({
   accountId: z.string().uuid(),
-  accountBalance: z.number().int(),
-  ledgerDerivedBalance: z.number().int(),
+  accountBalance: nonNegativeMinorUnitStringSchema,
+  ledgerDerivedBalance: signedMinorUnitStringSchema,
   isReconciled: z.boolean(),
-  totalDebits: z.number().int(),
-  totalCredits: z.number().int(),
-  discrepancy: z.number().int(),
+  totalDebits: nonNegativeMinorUnitStringSchema,
+  totalCredits: nonNegativeMinorUnitStringSchema,
+  discrepancy: signedMinorUnitStringSchema,
 });
 export type LedgerReconciliationResponse = z.infer<typeof ledgerReconciliationResponseSchema>;

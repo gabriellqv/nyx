@@ -158,9 +158,9 @@ describe('Reconciliation Module Integration Tests', () => {
         (d: { accountId: string }) => d.accountId === accountAId,
       );
       expect(detailA).toBeDefined();
-      expect(detailA.accountBalance).toBe(8000);
-      expect(detailA.ledgerBalance).toBe(8000);
-      expect(detailA.discrepancy).toBe(0);
+      expect(detailA.accountBalance).toBe('8000');
+      expect(detailA.ledgerBalance).toBe('8000');
+      expect(detailA.discrepancy).toBe('0');
       expect(detailA.isBalanced).toBe(true);
 
       // Account B: 0 opening + 2,000 credit = 2,000
@@ -168,9 +168,9 @@ describe('Reconciliation Module Integration Tests', () => {
         (d: { accountId: string }) => d.accountId === accountBId,
       );
       expect(detailB).toBeDefined();
-      expect(detailB.accountBalance).toBe(2000);
-      expect(detailB.ledgerBalance).toBe(2000);
-      expect(detailB.discrepancy).toBe(0);
+      expect(detailB.accountBalance).toBe('2000');
+      expect(detailB.ledgerBalance).toBe('2000');
+      expect(detailB.discrepancy).toBe('0');
       expect(detailB.isBalanced).toBe(true);
 
       // Verify audit log and reconciliation log in database
@@ -226,9 +226,9 @@ describe('Reconciliation Module Integration Tests', () => {
       );
       expect(detailA).toBeDefined();
       expect(detailA.isBalanced).toBe(false);
-      expect(detailA.accountBalance).toBe(99999);
-      expect(detailA.ledgerBalance).toBe(10000);
-      expect(detailA.discrepancy).toBe(89999);
+      expect(detailA.accountBalance).toBe('99999');
+      expect(detailA.ledgerBalance).toBe('10000');
+      expect(detailA.discrepancy).toBe('89999');
     });
   });
 });

@@ -1,17 +1,16 @@
 import { z } from 'zod';
+import { cursorPageResponseSchema } from './pagination.contract';
+import { positiveMinorUnitInputSchema, positiveMinorUnitStringSchema } from './money.contract';
 
 /**
  * Schema for initiating a balance transfer between accounts.
- * Enforces UUID formats, positive integer amounts in minor currency units (cents),
+ * Enforces UUID formats and positive integer minor-unit amounts encoded as decimal strings,
  * and client-provided idempotency keys to guarantee at-most-once processing.
  */
 export const createTransferSchema = z.object({
   sourceAccountId: z.string().uuid({ message: 'Source account ID must be a valid UUID' }),
   destinationAccountId: z.string().uuid({ message: 'Destination account ID must be a valid UUID' }),
-  amount: z
-    .number()
-    .int({ message: 'Amount must be an integer representing minor units (cents)' })
-    .positive({ message: 'Amount must be greater than zero' }),
+  amount: positiveMinorUnitInputSchema,
   currency: z
     .string()
     .length(3, { message: 'Currency must be an ISO 4217 three-letter code' })
@@ -37,7 +36,7 @@ export const transferResponseSchema = z.object({
   id: z.string().uuid(),
   sourceAccountId: z.string().uuid(),
   destinationAccountId: z.string().uuid(),
-  amount: z.number().int().positive(),
+  amount: positiveMinorUnitStringSchema,
   currency: z.string().length(3),
   status: transferStatusSchema,
   idempotencyKey: z.string(),
@@ -47,6 +46,8 @@ export const transferResponseSchema = z.object({
   completedAt: z.string().datetime().nullable(),
 });
 export type TransferResponse = z.infer<typeof transferResponseSchema>;
+export const transferPageResponseSchema = cursorPageResponseSchema(transferResponseSchema);
+export type TransferPageResponse = z.infer<typeof transferPageResponseSchema>;
 
 /**
  * Contract schema for requesting explicit reversal of a posted transfer.

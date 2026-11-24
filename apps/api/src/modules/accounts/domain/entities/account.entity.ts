@@ -73,7 +73,7 @@ export class Account {
     this.assertIsActive();
     if (this.currentBalance.amount < amount.amount) {
       throw new InsufficientFundsException(
-        `Insufficient funds in account ${this.accountNumber}. Available: ${this.currentBalance.amountNumber}, Requested: ${amount.amountNumber}`,
+        `Insufficient funds in account ${this.accountNumber}. Available: ${this.currentBalance.amount}, Requested: ${amount.amount}`,
       );
     }
 
