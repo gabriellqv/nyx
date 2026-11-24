@@ -178,6 +178,8 @@ DB_PASSWORD=... ./infrastructure/scripts/backup-database.sh
 DB_PASSWORD=... DB_NAME=nyx_restore ./infrastructure/scripts/restore-database.sh /path/to/backup.sql.gz
 ```
 
+The restore target must already exist and be empty. CI creates a disposable target to verify the full backup and restore path.
+
 The container release workflow validates the Terraform and publishes images to GHCR. It does not deploy the application. Terraform currently describes a partial VPC, RDS PostgreSQL instance, and ALB foundation; it does not define ECS task definitions, ECS services, Secrets Manager, or a complete production network path.
 
 ---

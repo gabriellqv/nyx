@@ -26,7 +26,7 @@ describe('Environment configuration', () => {
         NODE_ENV: 'production',
         DATABASE_URL: databaseUrl,
         JWT_SECRET: 'a-production-secret-with-at-least-32-characters',
-        WEBHOOK_SECRET_ENCRYPTION_KEY: '0123456789abcdef'.repeat(4),
+        WEBHOOK_SECRET_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('hex'),
       }),
     ).not.toThrow();
   });
