@@ -37,8 +37,7 @@ describe('Payments Module Integration Tests', () => {
     await prisma.outboxEvent.deleteMany();
     await prisma.payment.deleteMany();
     await prisma.auditLog.deleteMany();
-    await prisma.ledgerEntry.deleteMany();
-    await prisma.ledgerTransaction.deleteMany();
+    await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();
@@ -96,15 +95,21 @@ describe('Payments Module Integration Tests', () => {
       const updatedAccount = await prisma.account.findUnique({ where: { id: accountId } });
       expect(updatedAccount?.balance).toBe(15000n);
 
-      // Verify ledger transaction and entry recorded
+      // Verify the customer liability is balanced by an internal clearing asset
       const ledgerTx = await prisma.ledgerTransaction.findFirst({
         where: { referenceType: 'payment', referenceId: res.body.id },
         include: { entries: true },
       });
       expect(ledgerTx).toBeDefined();
-      expect(ledgerTx?.entries.length).toBe(1);
-      expect(ledgerTx?.entries[0]?.entryType).toBe('credit');
-      expect(ledgerTx?.entries[0]?.amount).toBe(5000n);
+      expect(ledgerTx?.entries.length).toBeGreaterThanOrEqual(2);
+      const totalDebits = ledgerTx?.entries
+        .filter(entry => entry.entryType === 'debit')
+        .reduce((sum, entry) => sum + entry.amount, 0n);
+      const totalCredits = ledgerTx?.entries
+        .filter(entry => entry.entryType === 'credit')
+        .reduce((sum, entry) => sum + entry.amount, 0n);
+      expect(totalDebits).toBe(5000n);
+      expect(totalCredits).toBe(5000n);
 
       // Verify Outbox event created atomically
       const outboxEvent = await prisma.outboxEvent.findFirst({
@@ -214,6 +219,64 @@ describe('Payments Module Integration Tests', () => {
   });
 
   describe('3. Validation and Invariants', () => {
+    it('should reject a ledger transaction with only one posting at the database boundary', async () => {
+      await expect(
+        prisma.ledgerTransaction.create({
+          data: {
+            id: randomUUID(),
+            description: 'Invalid unilateral posting',
+            referenceType: 'payment',
+            referenceId: randomUUID(),
+            entries: {
+              create: {
+                id: randomUUID(),
+                accountId,
+                entryType: 'credit',
+                amount: 100n,
+                currency: 'USD',
+                sequenceNumber: 1,
+              },
+            },
+          },
+        }),
+      ).rejects.toThrow('at least two balanced postings');
+    });
+
+    it('should reject changes to posted ledger entries', async () => {
+      const paymentResponse = await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          destinationAccountId: accountId,
+          amount: 500,
+          currency: 'USD',
+          method: 'pix',
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+
+      const entry = await prisma.ledgerEntry.findFirst({
+        where: {
+          transaction: { referenceType: 'payment', referenceId: paymentResponse.body.id },
+        },
+      });
+      expect(entry).toBeDefined();
+
+      await expect(
+        prisma.ledgerEntry.update({
+          where: { id: entry!.id },
+          data: { amount: entry!.amount + 1n },
+        }),
+      ).rejects.toThrow('posted ledger records are immutable');
+
+      await expect(
+        prisma.ledgerTransaction.update({
+          where: { id: entry!.transactionId },
+          data: { description: 'Altered after posting' },
+        }),
+      ).rejects.toThrow('posted ledger records are immutable');
+    });
+
     it('should reject payment with incompatible currency (400 Bad Request)', async () => {
       await request(app.getHttpServer())
         .post('/payments')

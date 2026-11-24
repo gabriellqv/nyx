@@ -1,6 +1,6 @@
 import { LedgerEntry } from './ledger-entry.entity';
 
-export type LedgerReferenceType = 'transfer' | 'deposit' | 'reversal' | 'adjustment';
+export type LedgerReferenceType = 'transfer' | 'deposit' | 'payment' | 'reversal' | 'adjustment';
 
 /**
  * Immutable entity representing a ledger transaction that encapsulates balanced entries.

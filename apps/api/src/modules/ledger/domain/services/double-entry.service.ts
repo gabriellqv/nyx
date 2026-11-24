@@ -17,7 +17,8 @@ export class DoubleEntryLedgerService {
     referenceType: LedgerReferenceType;
     referenceId?: string | null;
     entries: Array<{
-      accountId: string;
+      accountId?: string;
+      ledgerAccountId?: string;
       entryType: 'debit' | 'credit';
       amount: Money;
     }>;
@@ -36,6 +37,12 @@ export class DoubleEntryLedgerService {
     const ledgerEntries: LedgerEntry[] = [];
 
     params.entries.forEach((entry, index) => {
+      if (Boolean(entry.accountId) === Boolean(entry.ledgerAccountId)) {
+        throw new UnbalancedLedgerException(
+          'Each ledger entry must reference exactly one customer or internal ledger account',
+        );
+      }
+
       if (entry.amount.currency !== currency) {
         throw new UnbalancedLedgerException(
           `All entries in a single ledger transaction must share the same currency (${currency})`,
@@ -56,7 +63,8 @@ export class DoubleEntryLedgerService {
         new LedgerEntry({
           id: randomUUID(),
           transactionId,
-          accountId: entry.accountId,
+          ...(entry.accountId ? { accountId: entry.accountId } : {}),
+          ...(entry.ledgerAccountId ? { ledgerAccountId: entry.ledgerAccountId } : {}),
           entryType: entry.entryType,
           amount: entry.amount,
           sequenceNumber: index + 1,
@@ -133,6 +141,32 @@ export class DoubleEntryLedgerService {
         },
         {
           accountId: params.sourceAccountId,
+          entryType: 'credit',
+          amount: params.amount,
+        },
+      ],
+    });
+  }
+
+  createIncomingPaymentTransaction(params: {
+    paymentId: string;
+    destinationAccountId: string;
+    clearingLedgerAccountId: string;
+    amount: Money;
+    description?: string;
+  }): LedgerTransaction {
+    return this.createTransaction({
+      description: params.description ?? `Incoming payment ${params.paymentId}`,
+      referenceType: 'payment',
+      referenceId: params.paymentId,
+      entries: [
+        {
+          ledgerAccountId: params.clearingLedgerAccountId,
+          entryType: 'debit',
+          amount: params.amount,
+        },
+        {
+          accountId: params.destinationAccountId,
           entryType: 'credit',
           amount: params.amount,
         },

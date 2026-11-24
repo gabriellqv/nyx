@@ -66,20 +66,38 @@ model LedgerTransaction {
   @@map("ledger_transactions")
 }
 
+model LedgerAccount {
+  id          String   @id @default(uuid())
+  code        String
+  name        String
+  currency    String   @db.VarChar(3)
+  accountType String   @default("asset") @map("account_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  entries LedgerEntry[]
+
+  @@unique([code, currency])
+  @@map("ledger_accounts")
+}
+
 model LedgerEntry {
-  id             String            @id @default(uuid())
-  transactionId  String            @map("transaction_id")
-  accountId      String            @map("account_id")
-  entryType      String            @map("entry_type")
+  id              String   @id @default(uuid())
+  transactionId   String   @map("transaction_id")
+  accountId       String?  @map("account_id")
+  ledgerAccountId String?  @map("ledger_account_id")
+  entryType       String   @map("entry_type")
   amount         BigInt
-  currency       String            @db.VarChar(3)
-  sequenceNumber Int               @map("sequence_number")
-  createdAt      DateTime          @default(now()) @map("created_at")
+  currency        String   @db.VarChar(3)
+  sequenceNumber  Int      @map("sequence_number")
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  transaction    LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  account        Account           @relation(fields: [accountId], references: [id])
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  account       Account?          @relation(fields: [accountId], references: [id])
+  ledgerAccount LedgerAccount?    @relation(fields: [ledgerAccountId], references: [id])
 
+  @@unique([transactionId, sequenceNumber])
   @@index([accountId])
+  @@index([ledgerAccountId])
   @@index([transactionId])
   @@map("ledger_entries")
 }

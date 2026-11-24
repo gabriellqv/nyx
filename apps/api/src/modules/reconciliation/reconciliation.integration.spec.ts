@@ -39,8 +39,7 @@ describe('Reconciliation Module Integration Tests', () => {
     await prisma.outboxEvent.deleteMany();
     await prisma.payment.deleteMany();
     await prisma.auditLog.deleteMany();
-    await prisma.ledgerEntry.deleteMany();
-    await prisma.ledgerTransaction.deleteMany();
+    await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();
@@ -71,6 +70,18 @@ describe('Reconciliation Module Integration Tests', () => {
       },
     });
 
+    const openingFunds = await prisma.ledgerAccount.upsert({
+      where: { code_currency: { code: 'opening-funds', currency: 'USD' } },
+      create: {
+        id: randomUUID(),
+        code: 'opening-funds',
+        name: 'Opening funds clearing',
+        currency: 'USD',
+        accountType: 'asset',
+      },
+      update: {},
+    });
+
     await prisma.ledgerTransaction.create({
       data: {
         id: randomUUID(),
@@ -81,11 +92,19 @@ describe('Reconciliation Module Integration Tests', () => {
           create: [
             {
               id: randomUUID(),
+              ledgerAccountId: openingFunds.id,
+              entryType: 'debit',
+              amount: 10000n,
+              currency: 'USD',
+              sequenceNumber: 1,
+            },
+            {
+              id: randomUUID(),
               accountId: accountAId,
               entryType: 'credit',
               amount: 10000n,
               currency: 'USD',
-              sequenceNumber: 1,
+              sequenceNumber: 2,
             },
           ],
         },

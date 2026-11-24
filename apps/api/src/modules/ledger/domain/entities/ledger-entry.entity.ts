@@ -8,7 +8,8 @@ export type LedgerEntryType = 'debit' | 'credit';
 export class LedgerEntry {
   readonly id: string;
   readonly transactionId: string;
-  readonly accountId: string;
+  readonly accountId: string | null;
+  readonly ledgerAccountId: string | null;
   readonly entryType: LedgerEntryType;
   readonly amount: Money;
   readonly sequenceNumber: number;
@@ -17,7 +18,8 @@ export class LedgerEntry {
   constructor(params: {
     id: string;
     transactionId: string;
-    accountId: string;
+    accountId?: string | null;
+    ledgerAccountId?: string | null;
     entryType: LedgerEntryType;
     amount: Money;
     sequenceNumber: number;
@@ -25,7 +27,8 @@ export class LedgerEntry {
   }) {
     this.id = params.id;
     this.transactionId = params.transactionId;
-    this.accountId = params.accountId;
+    this.accountId = params.accountId ?? null;
+    this.ledgerAccountId = params.ledgerAccountId ?? null;
     this.entryType = params.entryType;
     this.amount = params.amount;
     this.sequenceNumber = params.sequenceNumber;
