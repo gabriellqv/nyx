@@ -23,6 +23,8 @@ export interface OutboxRecord {
   errorMessage: string | null;
   createdAt: Date;
   processedAt: Date | null;
+  lockedAt: Date | null;
+  lockedBy: string | null;
 }
 
 @Injectable()
@@ -66,58 +68,107 @@ export class OutboxService {
   /**
    * Fetches pending events eligible for dispatching.
    */
-  async fetchPending(limit = 50): Promise<OutboxRecord[]> {
+  async claimPending(
+    limit = 50,
+    workerId = randomUUID(),
+    leaseMilliseconds = 120_000,
+  ): Promise<OutboxRecord[]> {
     const now = new Date();
-    return this.prisma.outboxEvent.findMany({
-      where: {
-        status: 'pending',
-        nextRetryAt: { lte: now },
-      },
-      take: limit,
-      orderBy: { createdAt: 'asc' },
-    });
+    const expiredBefore = new Date(now.getTime() - leaseMilliseconds);
+
+    return this.prisma.$queryRaw<OutboxRecord[]>`
+      WITH eligible AS (
+        SELECT id
+        FROM outbox_events
+        WHERE (status = 'pending' AND next_retry_at <= ${now})
+           OR (status = 'processing' AND locked_at <= ${expiredBefore})
+        ORDER BY created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT ${limit}
+      )
+      UPDATE outbox_events AS event
+      SET status = 'processing', locked_at = ${now}, locked_by = ${workerId}
+      FROM eligible
+      WHERE event.id = eligible.id
+      RETURNING
+        event.id,
+        event.event_type AS "eventType",
+        event.aggregate_type AS "aggregateType",
+        event.aggregate_id AS "aggregateId",
+        event.payload,
+        event.status,
+        event.retry_count AS "retryCount",
+        event.max_retries AS "maxRetries",
+        event.next_retry_at AS "nextRetryAt",
+        event.error_message AS "errorMessage",
+        event.created_at AS "createdAt",
+        event.processed_at AS "processedAt",
+        event.locked_at AS "lockedAt",
+        event.locked_by AS "lockedBy"
+    `;
   }
 
   /**
-   * Marks an outbox event as successfully processed and published.
+   * Extends the lease held by a dispatcher while it sends webhooks.
    */
-  async markPublished(id: string): Promise<void> {
-    await this.prisma.outboxEvent.update({
-      where: { id },
+  async extendLease(id: string, workerId: string): Promise<boolean> {
+    const result = await this.prisma.outboxEvent.updateMany({
+      where: { id, status: 'processing', lockedBy: workerId },
+      data: {
+        lockedAt: new Date(),
+      },
+    });
+    return result.count === 1;
+  }
+
+  /**
+   * Marks an event published only if this dispatcher still owns its lease.
+   */
+  async markPublished(id: string, workerId: string): Promise<boolean> {
+    const result = await this.prisma.outboxEvent.updateMany({
+      where: { id, status: 'processing', lockedBy: workerId },
       data: {
         status: 'published',
         processedAt: new Date(),
         errorMessage: null,
+        lockedAt: null,
+        lockedBy: null,
       },
     });
+    return result.count === 1;
   }
 
   /**
    * Marks an outbox event as failed, scheduling exponential backoff retry.
    */
-  async markFailed(id: string, errorMessage: string): Promise<void> {
-    const event = await this.prisma.outboxEvent.findUnique({ where: { id } });
-    if (!event) return;
+  async markFailed(id: string, workerId: string, errorMessage: string): Promise<boolean> {
+    return this.prisma.$transaction(async tx => {
+      const event = await tx.outboxEvent.findFirst({
+        where: { id, status: 'processing', lockedBy: workerId },
+      });
+      if (!event) return false;
 
-    const nextRetryCount = event.retryCount + 1;
-    const isExhausted = nextRetryCount >= event.maxRetries;
+      const nextRetryCount = event.retryCount + 1;
+      const isExhausted = nextRetryCount >= event.maxRetries;
+      const backoffSeconds = Math.min(Math.pow(2, nextRetryCount), 60);
+      const nextRetryAt = new Date(Date.now() + backoffSeconds * 1000);
 
-    // Exponential backoff: 2s, 4s, 8s, 16s, 32s
-    const backoffSeconds = Math.min(Math.pow(2, nextRetryCount), 60);
-    const nextRetryAt = new Date(Date.now() + backoffSeconds * 1000);
+      await tx.outboxEvent.update({
+        where: { id },
+        data: {
+          status: isExhausted ? 'failed' : 'pending',
+          retryCount: nextRetryCount,
+          nextRetryAt,
+          errorMessage,
+          lockedAt: null,
+          lockedBy: null,
+        },
+      });
 
-    await this.prisma.outboxEvent.update({
-      where: { id },
-      data: {
-        status: isExhausted ? 'failed' : 'pending',
-        retryCount: nextRetryCount,
-        nextRetryAt,
-        errorMessage,
-      },
+      this.logger.warn(
+        `Outbox event ${id} delivery failed (attempt ${nextRetryCount}/${event.maxRetries}): ${errorMessage}`,
+      );
+      return true;
     });
-
-    this.logger.warn(
-      `Outbox event ${id} delivery failed (attempt ${nextRetryCount}/${event.maxRetries}): ${errorMessage}`,
-    );
   }
 }

@@ -34,6 +34,7 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-nyx_prod_user}:${POSTGRES_PASSWORD:-nyx_prod_password}@postgres:5432/${POSTGRES_DB:-nyx_prod}?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY is required}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3001}
     ports:
       - '3000:3000'

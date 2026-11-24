@@ -33,7 +33,7 @@ Transfers run inside a single database transaction and lock the affected account
 
 ### Transactional outbox
 
-Events are written to an `Outbox` table in the same transaction that commits the ledger change. A dispatcher polls pending rows, signs payloads with HMAC-SHA256, and delivers them with exponential backoff and delivery tracking. Writing to a queue directly would be simpler, but it would also mean the ledger and the event could disagree after a crash.
+Events are written to an `Outbox` table in the same transaction that commits the ledger change. Dispatchers claim rows with leases and PostgreSQL `SKIP LOCKED`, sign payloads with HMAC-SHA256, and retry failed endpoints without resending successful deliveries. Delivery is at-least-once: the delivery ID stays stable across retries, and consumers should deduplicate by that ID.
 
 ### Reconciliation
 
@@ -102,6 +102,8 @@ nyx/
 - JWT authentication with role claims and three roles: `admin`, `user`, `auditor`.
 - Authentication is required by default. Health checks, metrics, login, and public registration are the explicit public routes.
 - Public registration always creates an unprivileged user without customer ownership. The initial administrator is provisioned through the local administration command.
+- Webhook secrets are encrypted at rest with AES-256-GCM. Production requires a separately managed `WEBHOOK_SECRET_ENCRYPTION_KEY`.
+- Webhook destinations are revalidated at registration and dispatch, private and reserved network addresses are rejected, DNS results are pinned for the request, and redirects are not followed.
 - Transfers check that the caller owns or is authorized over the source account.
 - Authentication, account creation, manual adjustments, and webhook changes are written to an append-only `AuditLog` with user, IP, user agent, correlation ID, and state diff.
 - Outgoing webhooks carry an `X-Nyx-Signature` HMAC-SHA256 over a timestamped body, so consumers can reject tampered or replayed requests.

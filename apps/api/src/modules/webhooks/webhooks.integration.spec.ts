@@ -15,9 +15,11 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
   let adminToken: string;
   let mockServer: http.Server;
   let mockServerUrl: string;
+  const requestCounts = new Map<string, number>();
   let receivedRequests: Array<{
     headers: http.IncomingHttpHeaders;
     body: string;
+    path: string;
   }> = [];
 
   beforeAll(async () => {
@@ -28,9 +30,27 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
         body += chunk;
       });
       req.on('end', () => {
-        receivedRequests.push({ headers: req.headers, body });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ received: true }));
+        receivedRequests.push({ headers: req.headers, body, path: req.url ?? '/' });
+        const path = new URL(req.url ?? '/', 'http://localhost').pathname;
+        const count = (requestCounts.get(path) ?? 0) + 1;
+        requestCounts.set(path, count);
+        const statusCode =
+          path === '/redirect' ? 302 : path === '/fail-once' && count === 1 ? 503 : 200;
+        const respond = () => {
+          res.writeHead(statusCode, {
+            'Content-Type': 'application/json',
+            ...(path === '/redirect'
+              ? { Location: 'http://169.254.169.254/latest/meta-data/' }
+              : {}),
+          });
+          res.end(JSON.stringify({ received: true }));
+        };
+        const delay = Number(new URL(req.url ?? '/', 'http://localhost').searchParams.get('delay'));
+        if (delay > 0) {
+          setTimeout(respond, delay);
+        } else {
+          respond();
+        }
       });
     });
 
@@ -62,6 +82,7 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
 
   beforeEach(async () => {
     receivedRequests = [];
+    requestCounts.clear();
     await prisma.webhookDelivery.deleteMany();
     await prisma.webhookEndpoint.deleteMany();
     await prisma.outboxEvent.deleteMany();
@@ -76,6 +97,53 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
   });
 
   describe('1. Webhook Endpoint Management', () => {
+    it('should reject webhook URLs that resolve to link-local infrastructure', async () => {
+      await request(app.getHttpServer())
+        .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          url: 'http://169.254.169.254/latest/meta-data/',
+          events: ['*'],
+        })
+        .expect(400);
+    });
+
+    it('should not follow redirects returned by a webhook endpoint', async () => {
+      await request(app.getHttpServer())
+        .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          url: mockServerUrl.replace('/webhook-target', '/redirect'),
+          events: ['transfer.posted'],
+        })
+        .expect(201);
+
+      const event = await prisma.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          eventType: 'transfer.posted',
+          aggregateType: 'transfer',
+          aggregateId: randomUUID(),
+          payload: JSON.stringify({ test: 'no redirect' }),
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 3,
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/webhooks/dispatch')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(requestCounts.get('/redirect')).toBe(1);
+      const delivery = await prisma.webhookDelivery.findFirst({
+        where: { outboxEventId: event.id },
+      });
+      expect(delivery?.statusCode).toBe(302);
+      expect(delivery?.status).toBe('failed');
+    });
+
     it('should register a webhook endpoint and return its signing secret', async () => {
       const res = await request(app.getHttpServer())
         .post('/webhooks/endpoints')
@@ -92,6 +160,12 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       expect(res.body.secret).toBeDefined();
       expect(res.body.secret.length).toBeGreaterThanOrEqual(16);
       expect(res.body.status).toBe('active');
+
+      const storedEndpoint = await prisma.webhookEndpoint.findUnique({
+        where: { id: res.body.id },
+      });
+      expect(storedEndpoint?.secret).not.toBe(res.body.secret);
+      expect(storedEndpoint?.secret).toMatch(/^enc:v1:/);
     });
 
     it('should list registered webhook endpoints', async () => {
@@ -277,6 +351,134 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       });
       expect(delivery).toBeDefined();
       expect(delivery?.status).toBe('failed');
+    });
+
+    it('should not dispatch the same claimed event concurrently', async () => {
+      await request(app.getHttpServer())
+        .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          url: `${mockServerUrl}?delay=150`,
+          events: ['transfer.posted'],
+        })
+        .expect(201);
+
+      await prisma.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          eventType: 'transfer.posted',
+          aggregateType: 'transfer',
+          aggregateId: randomUUID(),
+          payload: JSON.stringify({ test: 'single claim' }),
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 3,
+        },
+      });
+
+      const responses = await Promise.all(
+        Array.from({ length: 2 }, () =>
+          request(app.getHttpServer())
+            .post('/webhooks/dispatch')
+            .set('Authorization', `Bearer ${adminToken}`),
+        ),
+      );
+
+      expect(responses.every(response => response.status === 200)).toBe(true);
+      expect(receivedRequests).toHaveLength(1);
+    });
+
+    it('should reclaim an outbox event after a dispatcher lease expires', async () => {
+      await request(app.getHttpServer())
+        .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ url: mockServerUrl, events: ['transfer.posted'] })
+        .expect(201);
+
+      const event = await prisma.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          eventType: 'transfer.posted',
+          aggregateType: 'transfer',
+          aggregateId: randomUUID(),
+          payload: JSON.stringify({ test: 'expired lease' }),
+          status: 'processing',
+          retryCount: 0,
+          maxRetries: 3,
+          lockedAt: new Date(Date.now() - 180_000),
+          lockedBy: 'worker-that-crashed',
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/webhooks/dispatch')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const reclaimed = await prisma.outboxEvent.findUnique({ where: { id: event.id } });
+      expect(receivedRequests).toHaveLength(1);
+      expect(reclaimed?.status).toBe('published');
+      expect(reclaimed?.lockedBy).toBeNull();
+    });
+
+    it('should retry only failed endpoints when a webhook event has partial success', async () => {
+      const successUrl = mockServerUrl.replace('/webhook-target', '/always-success');
+      const failOnceUrl = `${mockServerUrl.replace('/webhook-target', '')}/fail-once`;
+
+      const registered: Array<{ id: string }> = [];
+      for (const url of [successUrl, failOnceUrl]) {
+        const response = await request(app.getHttpServer())
+          .post('/webhooks/endpoints')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ url, events: ['transfer.posted'] })
+          .expect(201);
+        registered.push(response.body as { id: string });
+      }
+
+      const event = await prisma.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          eventType: 'transfer.posted',
+          aggregateType: 'transfer',
+          aggregateId: randomUUID(),
+          payload: JSON.stringify({ test: 'partial retry' }),
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 3,
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/webhooks/dispatch')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      await prisma.outboxEvent.update({
+        where: { id: event.id },
+        data: { nextRetryAt: new Date(Date.now() - 1000) },
+      });
+
+      await request(app.getHttpServer())
+        .post('/webhooks/dispatch')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(requestCounts.get('/always-success')).toBe(1);
+      expect(requestCounts.get('/fail-once')).toBe(2);
+      const deliveries = await prisma.webhookDelivery.findMany({
+        where: { outboxEventId: event.id },
+        orderBy: { endpointId: 'asc' },
+      });
+      expect(deliveries).toHaveLength(2);
+      expect(deliveries.map(delivery => delivery.attempts).sort()).toEqual([1, 2]);
+
+      const failedRequests = receivedRequests.filter(request =>
+        request.path.startsWith('/fail-once'),
+      );
+      const failedDelivery = deliveries.find(delivery => delivery.endpointId === registered[1]?.id);
+      expect(failedRequests).toHaveLength(2);
+      expect(failedRequests[0]?.headers['x-nyx-delivery']).toBe(failedDelivery?.id);
+      expect(failedRequests[1]?.headers['x-nyx-delivery']).toBe(failedDelivery?.id);
     });
   });
 });

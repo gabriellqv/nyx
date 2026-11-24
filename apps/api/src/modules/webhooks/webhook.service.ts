@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID, randomBytes } from 'node:crypto';
 import type {
   RegisterWebhookEndpointRequest,
@@ -6,6 +6,8 @@ import type {
   WebhookDeliveryResponse,
 } from '@nyx/contracts';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { resolveWebhookTarget } from './webhook-target';
+import { encryptWebhookSecret } from './webhook-secret';
 
 @Injectable()
 export class WebhookService {
@@ -14,6 +16,12 @@ export class WebhookService {
   async registerEndpoint(
     dto: RegisterWebhookEndpointRequest,
   ): Promise<WebhookEndpointResponse & { secret: string }> {
+    try {
+      await resolveWebhookTarget(dto.url);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Invalid webhook URL');
+    }
+
     const id = randomUUID();
     const secret = dto.secret ?? randomBytes(24).toString('hex');
 
@@ -21,7 +29,7 @@ export class WebhookService {
       data: {
         id,
         url: dto.url,
-        secret,
+        secret: encryptWebhookSecret(secret),
         events: dto.events,
         status: 'active',
         description: dto.description ?? null,
@@ -34,7 +42,7 @@ export class WebhookService {
       events: created.events,
       status: created.status as 'active' | 'disabled',
       description: created.description,
-      secret: created.secret,
+      secret,
       createdAt: created.createdAt.toISOString(),
       updatedAt: created.updatedAt.toISOString(),
     };
@@ -94,7 +102,7 @@ export class WebhookService {
       endpointId: d.endpointId,
       outboxEventId: d.outboxEventId,
       statusCode: d.statusCode,
-      status: d.status as 'pending' | 'success' | 'failed',
+      status: d.status as 'pending' | 'processing' | 'success' | 'failed',
       attempts: d.attempts,
       durationMs: d.durationMs,
       responseBody: d.responseBody,

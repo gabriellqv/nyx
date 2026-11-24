@@ -52,7 +52,7 @@ export type WebhookEndpointResponse = z.infer<typeof webhookEndpointResponseSche
 /**
  * Status of a webhook dispatch attempt.
  */
-export const webhookDeliveryStatusSchema = z.enum(['pending', 'success', 'failed']);
+export const webhookDeliveryStatusSchema = z.enum(['pending', 'processing', 'success', 'failed']);
 export type WebhookDeliveryStatus = z.infer<typeof webhookDeliveryStatusSchema>;
 
 /**
