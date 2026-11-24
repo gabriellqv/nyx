@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [develop, main]
   pull_request:
-    branches: [main]
+    branches: [develop, main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +22,7 @@ jobs:
           POSTGRES_PASSWORD: nyx_password
           POSTGRES_DB: nyx_test
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -30,11 +30,13 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://nyx_user:nyx_password@localhost:5432/nyx_test?schema=public
+      DATABASE_URL: postgresql://nyx_user:nyx_password@localhost:5433/nyx_test?schema=public
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -51,13 +53,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level=critical
+        run: pnpm audit --prod --audit-level=high
 
       - name: Run Gitleaks secret detection
         uses: gitleaks/gitleaks-action@v2
+        if: ${{ !env.ACT }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
 
       - name: Check formatting with Prettier
         run: pnpm format:check
@@ -68,11 +70,36 @@ jobs:
       - name: Validate Prisma schema
         run: pnpm --filter @nyx/api exec prisma validate
 
+      - name: Validate production Compose configuration
+        run: |
+          export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          export DATABASE_URL="postgresql://nyx_prod_user:${POSTGRES_PASSWORD}@postgres:5432/nyx_prod?schema=public"
+          export JWT_SECRET="$(openssl rand -hex 32)"
+          export WEBHOOK_SECRET_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          docker compose -f docker-compose.prod.yml config --quiet
+
       - name: Generate Prisma client
         run: pnpm --filter @nyx/api exec prisma generate
 
       - name: Run Prisma migrations
         run: pnpm --filter @nyx/api exec prisma migrate deploy
+
+      - name: Verify database backup and restore
+        run: |
+          docker run --rm --network host \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            --env DB_HOST=127.0.0.1 \
+            --env DB_PORT=5433 \
+            --env DB_USER="${DB_USER}" \
+            --env DB_PASSWORD="${DB_PASSWORD}" \
+            --env DB_NAME="${DB_NAME}" \
+            postgres:16-alpine \
+            sh -c 'apk add --no-cache bash coreutils >/dev/null && bash infrastructure/scripts/test-backup-restore.sh'
+        env:
+          DB_USER: nyx_user
+          DB_PASSWORD: nyx_password
+          DB_NAME: nyx_test
 
       - name: Build shared packages
         run: pnpm --filter @nyx/contracts build
