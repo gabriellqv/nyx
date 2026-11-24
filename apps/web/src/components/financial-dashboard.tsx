@@ -20,6 +20,7 @@ import {
   CloseIcon,
   DatabaseIcon,
 } from './icons';
+import { NyxLogo } from './nyx-logo';
 import { StatusBadge } from './status-badge';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -338,14 +339,11 @@ export function FinancialDashboard(): React.JSX.Element {
     <div className="min-h-dvh bg-nyx-background text-nyx-text flex flex-col lg:flex-row">
       {/* Mobile Top Header */}
       <div className="lg:hidden bg-nyx-sidebar border-b border-nyx-border px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded bg-nyx-primary/20 border border-nyx-primary flex items-center justify-center text-nyx-highlight font-semibold text-sm">
-            N
-          </div>
-          <div>
-            <div className="text-sm font-semibold tracking-tight text-nyx-text">NYX</div>
-            <div className="text-xs text-nyx-muted">Core Ledger</div>
-          </div>
+        <div className="flex items-center gap-3">
+          <NyxLogo height={20} />
+          <span className="text-xs text-nyx-muted border-l border-nyx-border pl-2.5 font-medium">
+            Core Ledger
+          </span>
         </div>
         <button
           type="button"
@@ -365,14 +363,9 @@ export function FinancialDashboard(): React.JSX.Element {
       >
         <div className="p-5 flex flex-col gap-6">
           {/* Identity Header */}
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded bg-nyx-card border border-nyx-border flex items-center justify-center text-nyx-highlight font-semibold text-base">
-              N
-            </div>
-            <div>
-              <div className="text-sm font-semibold tracking-tight text-nyx-text">NYX PLATFORM</div>
-              <div className="text-xs text-nyx-muted">Core Banking & Ledger</div>
-            </div>
+          <div className="flex flex-col gap-1.5 pb-3 border-b border-nyx-border">
+            <NyxLogo height={24} />
+            <div className="text-xs text-nyx-muted font-medium">Core Banking & Ledger</div>
           </div>
 
           {/* Operational Navigation */}

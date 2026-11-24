@@ -2,9 +2,12 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Nyx Core Banking & Ledger Infrastructure',
+  title: 'Nyx',
   description:
     'Institutional financial infrastructure platform with immutable double-entry ledger, atomic transfers, and automated reconciliation.',
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({
