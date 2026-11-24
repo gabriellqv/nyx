@@ -200,10 +200,13 @@ model OutboxEvent {
   errorMessage  String?   @map("error_message")
   createdAt     DateTime  @default(now()) @map("created_at")
   processedAt   DateTime? @map("processed_at")
+  lockedAt      DateTime? @map("locked_at")
+  lockedBy      String?   @map("locked_by")
 
   deliveries    WebhookDelivery[]
 
   @@index([status, nextRetryAt])
+  @@index([status, lockedAt])
   @@index([aggregateType, aggregateId])
   @@map("outbox_events")
 }
@@ -241,6 +244,7 @@ model WebhookDelivery {
   @@index([endpointId])
   @@index([outboxEventId])
   @@index([status])
+  @@unique([endpointId, outboxEventId])
   @@map("webhook_deliveries")
 }
 

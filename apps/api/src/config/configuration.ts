@@ -12,6 +12,10 @@ export const environmentSchema = z
     DATABASE_URL: z.string().url(),
     CORS_ORIGIN: z.string().default('http://localhost:3000'),
     JWT_SECRET: z.string().min(32).optional(),
+    WEBHOOK_SECRET_ENCRYPTION_KEY: z
+      .string()
+      .regex(/^[a-fA-F0-9]{64}$/)
+      .optional(),
   })
   .superRefine((config, context) => {
     if (config.NODE_ENV === 'production' && !config.JWT_SECRET) {
@@ -19,6 +23,13 @@ export const environmentSchema = z
         code: z.ZodIssueCode.custom,
         path: ['JWT_SECRET'],
         message: 'JWT_SECRET is required in production',
+      });
+    }
+    if (config.NODE_ENV === 'production' && !config.WEBHOOK_SECRET_ENCRYPTION_KEY) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['WEBHOOK_SECRET_ENCRYPTION_KEY'],
+        message: 'WEBHOOK_SECRET_ENCRYPTION_KEY is required in production',
       });
     }
   });

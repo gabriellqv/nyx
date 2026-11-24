@@ -26,7 +26,19 @@ describe('Environment configuration', () => {
         NODE_ENV: 'production',
         DATABASE_URL: databaseUrl,
         JWT_SECRET: 'a-production-secret-with-at-least-32-characters',
+        WEBHOOK_SECRET_ENCRYPTION_KEY:
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       }),
     ).not.toThrow();
+  });
+
+  it('should require a valid webhook secret encryption key in production', () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'production',
+        DATABASE_URL: databaseUrl,
+        JWT_SECRET: 'a-production-secret-with-at-least-32-characters',
+      }),
+    ).toThrow('WEBHOOK_SECRET_ENCRYPTION_KEY');
   });
 });

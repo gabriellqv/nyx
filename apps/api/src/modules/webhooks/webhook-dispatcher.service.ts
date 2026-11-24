@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { OutboxService, OutboxRecord } from '../outbox/outbox.service';
+import { postWebhookRequest, resolveWebhookTarget } from './webhook-target';
+import { decryptWebhookSecret } from './webhook-secret';
 
 export interface DispatchResult {
   endpointId: string;
@@ -33,6 +35,11 @@ export class WebhookDispatcher {
    * Dispatches a single outbox event to all matching webhook subscriber endpoints.
    */
   async dispatchEvent(event: OutboxRecord): Promise<DispatchResult[]> {
+    const workerId = event.lockedBy;
+    if (!workerId) {
+      return [];
+    }
+
     const endpoints = await this.prisma.webhookEndpoint.findMany({
       where: {
         status: 'active',
@@ -42,7 +49,7 @@ export class WebhookDispatcher {
 
     if (endpoints.length === 0) {
       this.logger.debug(`No webhook subscribers found for event ${event.eventType}`);
-      await this.outboxService.markPublished(event.id);
+      await this.outboxService.markPublished(event.id, workerId);
       return [];
     }
 
@@ -50,9 +57,47 @@ export class WebhookDispatcher {
     let hasFailure = false;
 
     for (const endpoint of endpoints) {
-      const deliveryId = randomUUID();
+      const existingDelivery = await this.prisma.webhookDelivery.findUnique({
+        where: {
+          endpointId_outboxEventId: {
+            endpointId: endpoint.id,
+            outboxEventId: event.id,
+          },
+        },
+      });
+      if (existingDelivery?.status === 'success') {
+        continue;
+      }
+
+      if (!(await this.outboxService.extendLease(event.id, workerId))) {
+        return results;
+      }
+
+      const delivery = await this.prisma.webhookDelivery.upsert({
+        where: {
+          endpointId_outboxEventId: {
+            endpointId: endpoint.id,
+            outboxEventId: event.id,
+          },
+        },
+        create: {
+          id: randomUUID(),
+          endpointId: endpoint.id,
+          outboxEventId: event.id,
+          status: 'processing',
+          attempts: 1,
+        },
+        update: {
+          status: 'processing',
+          attempts: { increment: 1 },
+          statusCode: null,
+          durationMs: null,
+          responseBody: null,
+        },
+      });
+
+      const deliveryId = delivery.id;
       const timestamp = Math.floor(Date.now() / 1000);
-      const signature = this.signPayload(event.payload, endpoint.secret, timestamp);
       const startTime = Date.now();
 
       let statusCode: number | null = null;
@@ -60,23 +105,27 @@ export class WebhookDispatcher {
       let status: 'success' | 'failed';
 
       try {
-        const response = await fetch(endpoint.url, {
-          method: 'POST',
-          headers: {
+        const signature = this.signPayload(
+          event.payload,
+          decryptWebhookSecret(endpoint.secret),
+          timestamp,
+        );
+        const target = await resolveWebhookTarget(endpoint.url);
+        const response = await postWebhookRequest(
+          target,
+          {
             'Content-Type': 'application/json',
             'X-Nyx-Signature': `t=${timestamp},v1=${signature}`,
             'X-Nyx-Event': event.eventType,
             'X-Nyx-Delivery': deliveryId,
             'X-Nyx-Timestamp': String(timestamp),
           },
-          body: event.payload,
-          signal: AbortSignal.timeout(5000),
-        });
+          event.payload,
+        );
 
-        statusCode = response.status;
-        const text = await response.text();
-        responseBody = text.slice(0, 500);
-        status = response.ok ? 'success' : 'failed';
+        statusCode = response.statusCode;
+        responseBody = response.body.slice(0, 500);
+        status = response.statusCode >= 200 && response.statusCode < 300 ? 'success' : 'failed';
       } catch (error) {
         status = 'failed';
         responseBody = error instanceof Error ? error.message : String(error);
@@ -84,14 +133,11 @@ export class WebhookDispatcher {
 
       const durationMs = Date.now() - startTime;
 
-      await this.prisma.webhookDelivery.create({
+      await this.prisma.webhookDelivery.update({
+        where: { id: delivery.id },
         data: {
-          id: deliveryId,
-          endpointId: endpoint.id,
-          outboxEventId: event.id,
           statusCode,
           status,
-          attempts: 1,
           durationMs,
           responseBody,
         },
@@ -114,10 +160,11 @@ export class WebhookDispatcher {
     if (hasFailure) {
       await this.outboxService.markFailed(
         event.id,
+        workerId,
         `One or more webhook deliveries failed for event ${event.id}`,
       );
     } else {
-      await this.outboxService.markPublished(event.id);
+      await this.outboxService.markPublished(event.id, workerId);
     }
 
     return results;
@@ -127,12 +174,19 @@ export class WebhookDispatcher {
    * Processes all currently pending outbox events and dispatches them to webhooks.
    */
   async dispatchPending(): Promise<{ processedCount: number; results: DispatchResult[] }> {
-    const pendingEvents = await this.outboxService.fetchPending(50);
+    const workerId = randomUUID();
+    const pendingEvents = await this.outboxService.claimPending(50, workerId);
     const allResults: DispatchResult[] = [];
 
     for (const event of pendingEvents) {
-      const results = await this.dispatchEvent(event);
-      allResults.push(...results);
+      try {
+        const results = await this.dispatchEvent(event);
+        allResults.push(...results);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.outboxService.markFailed(event.id, workerId, message);
+        this.logger.error(`Outbox event ${event.id} dispatch failed`, message);
+      }
     }
 
     return {
