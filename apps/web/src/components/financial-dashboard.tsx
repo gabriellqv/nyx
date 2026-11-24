@@ -20,7 +20,9 @@ import {
   CloseIcon,
 } from './icons';
 import { NyxLogo } from './nyx-logo';
+import { LanguageSwitch } from './language-switch';
 import { StatusBadge } from './status-badge';
+import { useI18n } from '../lib/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -36,6 +38,8 @@ interface WebhookSimEvent {
 }
 
 export function FinancialDashboard(): React.JSX.Element {
+  const { t, formatMoney } = useI18n();
+
   const [activeTab, setActiveTab] = useState<TabView>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -70,7 +74,7 @@ export function FinancialDashboard(): React.JSX.Element {
   const auditSelectId = useId();
 
   // Outbox simulated events
-  const [webhookEvents, setWebhookEvents] = useState<WebhookSimEvent[]>([
+  const [webhookEvents] = useState<WebhookSimEvent[]>([
     {
       id: 'evt-9042b1',
       topic: 'transfer.posted',
@@ -148,39 +152,55 @@ export function FinancialDashboard(): React.JSX.Element {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: customer.id,
+          accountNumber: `ACC-AUR-${Math.floor(1000 + Math.random() * 9000)}`,
           currency: 'USD',
-          type: 'checking',
-          initialDeposit: 100000,
+          type: 'operating',
+          initialBalance: 100000,
         }),
       });
+      if (!acc1Res.ok) throw new Error('Primary account provisioning rejected');
       const acc1: AccountResponse = await acc1Res.json();
 
-      // 3. Create Secondary Settlement Account ($250.00 USD)
+      // 3. Create Liquidity Clearing Account ($500.00 USD)
       const acc2Res = await fetch(`${API_URL}/accounts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: customer.id,
+          accountNumber: `ACC-CLR-${Math.floor(1000 + Math.random() * 9000)}`,
           currency: 'USD',
-          type: 'checking',
-          initialDeposit: 25000,
+          type: 'settlement',
+          initialBalance: 50000,
         }),
       });
+      if (!acc2Res.ok) throw new Error('Clearing account provisioning rejected');
       const acc2: AccountResponse = await acc2Res.json();
 
-      setSourceAccountId(acc1.id);
-      setDestAccountId(acc2.id);
-      setDepositAccountId(acc1.id);
+      // 4. Execute Demonstration Atomic Transfer ($150.00 USD)
+      await fetch(`${API_URL}/transfers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceAccountId: acc1.id,
+          destinationAccountId: acc2.id,
+          amount: 15000,
+          currency: 'USD',
+          description: 'Automated treasury rebalance',
+          idempotencyKey: `seed-transfer-${Date.now()}`,
+        }),
+      });
 
       await fetchData();
+      setSourceAccountId(acc1.id);
+      setDestAccountId(acc2.id);
       setActionNotice({
         type: 'ok',
-        message: 'Accounts provisioned with initial balanced double-entry funding',
+        message: t.notices.seedSuccess,
       });
     } catch (err) {
       setActionNotice({
         type: 'error',
-        message: `Provisioning failed: ${(err as Error).message}`,
+        message: t.notices.seedFailed((err as Error).message),
       });
     } finally {
       setSubmitting(false);
@@ -189,24 +209,24 @@ export function FinancialDashboard(): React.JSX.Element {
 
   const handleExecuteTransfer = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    if (!sourceAccountId || !destAccountId) {
-      setActionNotice({ type: 'error', message: 'Select both origin and destination accounts' });
-      return;
-    }
+    if (!sourceAccountId || !destAccountId) return;
     if (sourceAccountId === destAccountId) {
       setActionNotice({
         type: 'error',
-        message: 'Origin and destination accounts must be distinct',
+        message: t.transfers.sameAccountError,
       });
       return;
     }
 
+    const cents = Math.round(parseFloat(transferAmount) * 100);
+    if (isNaN(cents) || cents <= 0) return;
+
     setSubmitting(true);
     setActionNotice(null);
-    try {
-      const cents = Math.round(parseFloat(transferAmount) * 100);
-      const idempotencyKey = `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    const idempotencyKey = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    try {
       const res = await fetch(`${API_URL}/transfers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,42 +235,31 @@ export function FinancialDashboard(): React.JSX.Element {
           destinationAccountId: destAccountId,
           amount: cents,
           currency: 'USD',
+          description: transferDescription,
           idempotencyKey,
-          description: transferDescription || 'Atomic transfer execution',
         }),
       });
 
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.message ?? 'Transfer rejected by core engine');
+        throw new Error(errorData.message ?? 'Transfer rejected by core');
       }
 
       await fetchData();
+      const srcAcc = accounts.find(a => a.id === sourceAccountId);
+      const dstAcc = accounts.find(a => a.id === destAccountId);
       setActionNotice({
         type: 'ok',
-        message: `Settled ${formatMoney(cents)} atomically with dual balanced ledger entries`,
+        message: t.notices.transferSuccess(
+          srcAcc?.accountNumber ?? sourceAccountId.slice(0, 8),
+          dstAcc?.accountNumber ?? destAccountId.slice(0, 8),
+          formatMoney(cents),
+        ),
       });
-
-      // Append to simulated webhook outbox log
-      setWebhookEvents(prev => [
-        {
-          id: `evt-${Date.now().toString().slice(-6)}`,
-          topic: 'transfer.posted',
-          timestamp: new Date().toISOString(),
-          payloadSummary: JSON.stringify({
-            source: sourceAccountId.slice(0, 8),
-            dest: destAccountId.slice(0, 8),
-            amount: cents,
-          }),
-          signature: `sha256=${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`,
-          status: 'dispatched',
-        },
-        ...prev,
-      ]);
     } catch (err) {
       setActionNotice({
         type: 'error',
-        message: `Transfer failed: ${(err as Error).message}`,
+        message: t.notices.transferFailed((err as Error).message),
       });
     } finally {
       setSubmitting(false);
@@ -261,12 +270,15 @@ export function FinancialDashboard(): React.JSX.Element {
     e.preventDefault();
     if (!depositAccountId) return;
 
+    const cents = Math.round(parseFloat(depositAmount) * 100);
+    if (isNaN(cents) || cents <= 0) return;
+
     setSubmitting(true);
     setActionNotice(null);
-    try {
-      const cents = Math.round(parseFloat(depositAmount) * 100);
-      const idempotencyKey = `dep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    const idempotencyKey = `dep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    try {
       const res = await fetch(`${API_URL}/accounts/${depositAccountId}/deposit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -283,14 +295,18 @@ export function FinancialDashboard(): React.JSX.Element {
       }
 
       await fetchData();
+      const targetAcc = accounts.find(a => a.id === depositAccountId);
       setActionNotice({
         type: 'ok',
-        message: `Deposited ${formatMoney(cents)} into account ledger`,
+        message: t.notices.depositSuccess(
+          targetAcc?.accountNumber ?? depositAccountId.slice(0, 8),
+          formatMoney(cents),
+        ),
       });
     } catch (err) {
       setActionNotice({
         type: 'error',
-        message: `Deposit failed: ${(err as Error).message}`,
+        message: t.notices.depositFailed((err as Error).message),
       });
     } finally {
       setSubmitting(false);
@@ -308,23 +324,16 @@ export function FinancialDashboard(): React.JSX.Element {
         setActionNotice({
           type: data.isReconciled ? 'ok' : 'error',
           message: data.isReconciled
-            ? `Reconciliation passed: Account ${accNumber} balance matches historical ledger sum`
-            : `Reconciliation discrepancy detected on account ${accNumber}`,
+            ? t.notices.reconciliationSuccess(accNumber)
+            : t.notices.reconciliationDiscrepancy(accNumber),
         });
       }
     } catch (err) {
       setActionNotice({
         type: 'error',
-        message: `Reconciliation error: ${(err as Error).message}`,
+        message: t.notices.reconciliationError((err as Error).message),
       });
     }
-  };
-
-  const formatMoney = (cents: number, currency = 'USD'): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-    }).format(cents / 100);
   };
 
   const activeSourceAccount = accounts.find(a => a.id === sourceAccountId);
@@ -341,17 +350,20 @@ export function FinancialDashboard(): React.JSX.Element {
         <div className="flex items-center gap-3">
           <NyxLogo height={20} />
           <span className="text-xs text-nyx-muted border-l border-nyx-border pl-2.5 font-medium">
-            Core Ledger
+            {t.brand.tagline}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2 rounded bg-nyx-card text-nyx-text border border-nyx-border"
-          aria-label="Toggle navigation menu"
-        >
-          {mobileMenuOpen ? <CloseIcon size={18} /> : <MenuIcon size={18} />}
-        </button>
+        <div className="flex items-center gap-2">
+          <LanguageSwitch />
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-2 rounded bg-nyx-card text-nyx-text border border-nyx-border"
+            aria-label="Toggle navigation menu"
+          >
+            {mobileMenuOpen ? <CloseIcon size={18} /> : <MenuIcon size={18} />}
+          </button>
+        </div>
       </div>
 
       {/* Primary Sidebar */}
@@ -364,7 +376,7 @@ export function FinancialDashboard(): React.JSX.Element {
           {/* Identity Header */}
           <div className="flex flex-col gap-1.5 pb-3 border-b border-nyx-border">
             <NyxLogo height={24} />
-            <div className="text-xs text-nyx-muted font-medium">Core Banking & Ledger</div>
+            <div className="text-xs text-nyx-muted font-medium">{t.brand.coreBanking}</div>
           </div>
 
           {/* Operational Navigation */}
@@ -382,7 +394,7 @@ export function FinancialDashboard(): React.JSX.Element {
               }`}
             >
               <LedgerIcon size={16} />
-              <span>Ledger & Accounts</span>
+              <span>{t.nav.overview}</span>
             </button>
 
             <button
@@ -398,7 +410,7 @@ export function FinancialDashboard(): React.JSX.Element {
               }`}
             >
               <TransferIcon size={16} />
-              <span>Atomic Transfers</span>
+              <span>{t.nav.transfers}</span>
             </button>
 
             <button
@@ -414,7 +426,7 @@ export function FinancialDashboard(): React.JSX.Element {
               }`}
             >
               <AuditIcon size={16} />
-              <span>Reconciliation</span>
+              <span>{t.nav.reconciliation}</span>
             </button>
 
             <button
@@ -430,7 +442,7 @@ export function FinancialDashboard(): React.JSX.Element {
               }`}
             >
               <OutboxIcon size={16} />
-              <span>Outbox & Events</span>
+              <span>{t.nav.outbox}</span>
             </button>
           </nav>
         </div>
@@ -442,24 +454,23 @@ export function FinancialDashboard(): React.JSX.Element {
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-nyx-border">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-nyx-text">
-              {activeTab === 'overview' && 'Treasury Ledger and Accounts'}
-              {activeTab === 'transfers' && 'Atomic Transfer Terminal'}
-              {activeTab === 'reconciliation' && 'Automated Ledger Reconciliation'}
-              {activeTab === 'outbox' && 'Transactional Outbox & HMAC Webhooks'}
+              {activeTab === 'overview' && t.header.overviewTitle}
+              {activeTab === 'transfers' && t.header.transfersTitle}
+              {activeTab === 'reconciliation' && t.header.reconciliationTitle}
+              {activeTab === 'outbox' && t.header.outboxTitle}
             </h1>
-            <p className="text-xs text-nyx-muted mt-0.5">
-              Strict mathematical double-entry enforcement in exact integer cents
-            </p>
+            <p className="text-xs text-nyx-muted mt-0.5">{t.header.subtitle}</p>
           </div>
 
-          <div className="flex items-center gap-2.5 self-start sm:self-auto">
-            <StatusBadge status="ok" label="Core Operational" />
+          <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+            <LanguageSwitch className="hidden sm:inline-flex" />
+            <StatusBadge status="ok" label={t.header.coreOperational} />
             <button
               type="button"
               onClick={() => void fetchData()}
               disabled={loading}
               className="p-1.5 rounded bg-nyx-card border border-nyx-border text-nyx-muted hover:text-nyx-text transition"
-              title="Refresh core state"
+              title={t.header.refreshTitle}
             >
               <RefreshIcon size={14} className={loading ? 'animate-spin' : ''} />
             </button>
@@ -470,7 +481,7 @@ export function FinancialDashboard(): React.JSX.Element {
               className="px-3 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition flex items-center gap-1.5 disabled:opacity-50"
             >
               <PlusIcon size={14} />
-              <span>Seed Demo Accounts</span>
+              <span>{submitting ? t.header.seeding : t.header.seedDemo}</span>
             </button>
           </div>
         </header>
@@ -502,35 +513,35 @@ export function FinancialDashboard(): React.JSX.Element {
         {/* High-Level Financial Metrics Ribbon */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
           <div className="p-4 rounded bg-nyx-card border border-nyx-border">
-            <div className="text-[13px] text-nyx-muted">Total Custody Liquidity</div>
+            <div className="text-[13px] text-nyx-muted">{t.metrics.totalLiquidity}</div>
             <div className="text-xl sm:text-2xl font-semibold text-nyx-text mt-1 tabular-nums">
               {formatMoney(totalCustodyBalance)}
             </div>
-            <div className="text-xs text-[#4ade80] mt-1">Audited in Cents</div>
+            <div className="text-xs text-[#4ade80] mt-1">{t.metrics.auditedInCents}</div>
           </div>
 
           <div className="p-4 rounded bg-nyx-card border border-nyx-border">
-            <div className="text-[13px] text-nyx-muted">Active Accounts</div>
+            <div className="text-[13px] text-nyx-muted">{t.metrics.activeAccounts}</div>
             <div className="text-xl sm:text-2xl font-semibold text-nyx-text mt-1 tabular-nums">
               {accounts.length}
             </div>
-            <div className="text-xs text-nyx-muted mt-1">Operating & Settlement</div>
+            <div className="text-xs text-nyx-muted mt-1">{t.metrics.operatingSettlement}</div>
           </div>
 
           <div className="p-4 rounded bg-nyx-card border border-nyx-border">
-            <div className="text-[13px] text-nyx-muted">Settled Transfers</div>
+            <div className="text-[13px] text-nyx-muted">{t.metrics.settledTransfers}</div>
             <div className="text-xl sm:text-2xl font-semibold text-nyx-text mt-1 tabular-nums">
               {transfers.length}
             </div>
-            <div className="text-xs text-[#4ade80] mt-1">Zero Variance</div>
+            <div className="text-xs text-[#4ade80] mt-1">{t.metrics.zeroVariance}</div>
           </div>
 
           <div className="p-4 rounded bg-nyx-card border border-nyx-border">
-            <div className="text-[13px] text-nyx-muted">Ledger Equilibrium</div>
+            <div className="text-[13px] text-nyx-muted">{t.metrics.ledgerEquilibrium}</div>
             <div className="text-xl sm:text-2xl font-semibold text-nyx-highlight mt-1 tabular-nums">
-              Debits = Credits
+              {t.metrics.equilibriumValue}
             </div>
-            <div className="text-xs text-nyx-muted mt-1">Mathematical Guarantee</div>
+            <div className="text-xs text-nyx-muted mt-1">{t.metrics.mathematicalGuarantee}</div>
           </div>
         </section>
 
@@ -540,25 +551,22 @@ export function FinancialDashboard(): React.JSX.Element {
             {/* Accounts Registry Grid */}
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-nyx-text">Account Registry</h2>
+                <h2 className="text-sm font-semibold text-nyx-text">{t.accounts.registryTitle}</h2>
                 <span className="text-xs text-nyx-muted tabular-nums">
-                  {accounts.length} account{accounts.length === 1 ? '' : 's'} registered
+                  {t.accounts.registryCount(accounts.length)}
                 </span>
               </div>
 
               {accounts.length === 0 ? (
                 <div className="p-8 rounded border border-dashed border-nyx-border bg-nyx-card/30 text-center flex flex-col items-center justify-center gap-3">
-                  <div className="text-sm text-nyx-muted max-w-sm">
-                    No accounts currently provisioned in the ledger. Click below to initialize
-                    corporate demo accounts with double-entry funding.
-                  </div>
+                  <div className="text-sm text-nyx-muted max-w-sm">{t.accounts.emptyText}</div>
                   <button
                     type="button"
                     onClick={() => void handleSeedInitialData()}
                     disabled={submitting}
                     className="px-3.5 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition"
                   >
-                    Seed Corporate Accounts
+                    {t.accounts.seedButton}
                   </button>
                 </div>
               ) : (
@@ -570,24 +578,28 @@ export function FinancialDashboard(): React.JSX.Element {
                     >
                       <div className="flex items-start justify-between">
                         <div>
-                          <div className="text-[13px] text-nyx-muted">Account Number</div>
+                          <div className="text-[13px] text-nyx-muted">
+                            {t.accounts.accountNumber}
+                          </div>
                           <div className="text-sm font-semibold text-nyx-text mt-0.5">
                             {account.accountNumber}
                           </div>
                         </div>
                         <StatusBadge
                           status={account.status === 'active' ? 'settled' : 'pending'}
-                          label={account.status.toUpperCase()}
+                          label={account.status === 'active' ? t.status.active : t.status.pending}
                         />
                       </div>
 
                       <div className="pt-1">
-                        <div className="text-[13px] text-nyx-muted">Available Balance</div>
+                        <div className="text-[13px] text-nyx-muted">
+                          {t.accounts.availableBalance}
+                        </div>
                         <div className="text-2xl font-semibold text-nyx-text tabular-nums mt-0.5">
                           {formatMoney(account.balance, account.currency)}
                         </div>
                         <div className="text-xs text-nyx-muted mt-1">
-                          Currency {account.currency} | Type {account.type}
+                          {t.accounts.currencyType(account.currency, account.type)}
                         </div>
                       </div>
 
@@ -597,7 +609,7 @@ export function FinancialDashboard(): React.JSX.Element {
                           onClick={() => void handleReconcile(account.id)}
                           className="text-nyx-highlight hover:underline font-medium text-[13px]"
                         >
-                          Audit Ledger
+                          {t.accounts.auditLedger}
                         </button>
                         <code className="text-nyx-muted text-[11px]">
                           {account.id.slice(0, 13)}...
@@ -611,14 +623,16 @@ export function FinancialDashboard(): React.JSX.Element {
 
             {/* Quick Liquidity Injection Form */}
             <section className="p-5 rounded bg-nyx-card border border-nyx-border">
-              <h2 className="text-sm font-semibold text-nyx-text mb-3">Deposit Funds to Account</h2>
+              <h2 className="text-sm font-semibold text-nyx-text mb-3">
+                {t.accounts.depositSectionTitle}
+              </h2>
               <form
                 onSubmit={handleDepositFunds}
                 className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"
               >
                 <div>
                   <label htmlFor={depositSelectId} className="block text-xs text-nyx-muted mb-1">
-                    Target Account
+                    {t.accounts.targetAccountLabel}
                   </label>
                   <select
                     id={depositSelectId}
@@ -636,7 +650,7 @@ export function FinancialDashboard(): React.JSX.Element {
 
                 <div>
                   <label htmlFor={depositAmountId} className="block text-xs text-nyx-muted mb-1">
-                    Deposit Amount (USD)
+                    {t.accounts.depositAmountLabel}
                   </label>
                   <input
                     id={depositAmountId}
@@ -654,59 +668,62 @@ export function FinancialDashboard(): React.JSX.Element {
                   disabled={submitting || accounts.length === 0}
                   className="h-9 px-4 rounded bg-nyx-primary hover:bg-nyx-primary-hover text-white text-xs font-medium transition disabled:opacity-50"
                 >
-                  Deposit Liquidity
+                  {submitting ? t.accounts.depositing : t.accounts.depositButton}
                 </button>
               </form>
             </section>
 
             {/* Recent Double-Entry Transfers Stream */}
             <section className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-nyx-text">Recent Double-Entry Transfers</h2>
+              <h2 className="text-sm font-semibold text-nyx-text">{t.transfers.recentTitle}</h2>
               <div className="rounded bg-nyx-card border border-nyx-border overflow-x-auto">
                 {transfers.length === 0 ? (
                   <div className="p-6 text-center text-xs text-nyx-muted">
-                    No transactions executed yet. Execute an atomic transfer in the Transfer
-                    Terminal tab.
+                    {t.transfers.emptyText}
                   </div>
                 ) : (
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-nyx-border bg-nyx-sidebar/60 text-nyx-muted">
-                        <th className="py-2.5 px-3 font-medium">Transaction</th>
-                        <th className="py-2.5 px-3 font-medium">Source Leg (Debit)</th>
-                        <th className="py-2.5 px-3 font-medium">Destination Leg (Credit)</th>
-                        <th className="py-2.5 px-3 font-medium text-right">Amount</th>
-                        <th className="py-2.5 px-3 font-medium text-center">Invariant</th>
-                        <th className="py-2.5 px-3 font-medium text-right">Status</th>
+                        <th className="py-2.5 px-3 font-medium">{t.transfers.thTransaction}</th>
+                        <th className="py-2.5 px-3 font-medium">{t.transfers.thDebit}</th>
+                        <th className="py-2.5 px-3 font-medium">{t.transfers.thCredit}</th>
+                        <th className="py-2.5 px-3 font-medium text-right">
+                          {t.transfers.thAmount}
+                        </th>
+                        <th className="py-2.5 px-3 font-medium text-center">{t.transfers.thFee}</th>
+                        <th className="py-2.5 px-3 font-medium text-right">
+                          {t.transfers.thStatus}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-nyx-border/40">
-                      {transfers.map(t => (
-                        <tr key={t.id} className="hover:bg-nyx-sidebar/30 transition">
+                      {transfers.map(tr => (
+                        <tr key={tr.id} className="hover:bg-nyx-sidebar/30 transition">
                           <td className="py-2.5 px-3 font-medium text-nyx-text">
-                            <div>{t.description || 'Atomic Transfer'}</div>
+                            <div>{tr.description || 'Atomic Transfer'}</div>
                             <code className="text-[11px] text-nyx-muted block">
-                              {t.id.slice(0, 16)}...
+                              {tr.id.slice(0, 16)}...
                             </code>
                           </td>
                           <td className="py-2.5 px-3 text-nyx-muted">
                             <span className="text-[#f87171] mr-1">-</span>
-                            <span>{t.sourceAccountId.slice(0, 12)}...</span>
+                            <span>{tr.sourceAccountId.slice(0, 12)}...</span>
                           </td>
                           <td className="py-2.5 px-3 text-nyx-muted">
                             <span className="text-[#4ade80] mr-1">+</span>
-                            <span>{t.destinationAccountId.slice(0, 12)}...</span>
+                            <span>{tr.destinationAccountId.slice(0, 12)}...</span>
                           </td>
                           <td className="py-2.5 px-3 text-right font-semibold text-nyx-text tabular-nums">
-                            {formatMoney(t.amount, t.currency)}
+                            {formatMoney(tr.amount, tr.currency)}
                           </td>
                           <td className="py-2.5 px-3 text-center">
                             <span className="px-1.5 py-0.5 rounded text-[11px] bg-[#142328] text-[#4ade80] border border-[#224840]">
-                              Δ = $0.00
+                              {t.transfers.feeFree}
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-right">
-                            <StatusBadge status="settled" label="SETTLED" />
+                            <StatusBadge status="settled" label={t.status.settled} />
                           </td>
                         </tr>
                       ))}
@@ -724,16 +741,16 @@ export function FinancialDashboard(): React.JSX.Element {
             {/* Transfer Terminal Input */}
             <div className="p-5 rounded bg-nyx-card border border-nyx-border flex flex-col gap-4">
               <div>
-                <h2 className="text-base font-semibold text-nyx-text">Transfer Terminal</h2>
-                <p className="text-xs text-nyx-muted mt-0.5">
-                  Execute real-time funds routing with atomic double-entry verification
-                </p>
+                <h2 className="text-base font-semibold text-nyx-text">
+                  {t.transfers.terminalTitle}
+                </h2>
+                <p className="text-xs text-nyx-muted mt-0.5">{t.transfers.terminalSubtitle}</p>
               </div>
 
               <form onSubmit={handleExecuteTransfer} className="flex flex-col gap-4">
                 <div>
                   <label htmlFor={sourceSelectId} className="block text-xs text-nyx-muted mb-1">
-                    Origin Account (Source Debit)
+                    {t.transfers.originLabel}
                   </label>
                   <select
                     id={sourceSelectId}
@@ -751,7 +768,7 @@ export function FinancialDashboard(): React.JSX.Element {
 
                 <div>
                   <label htmlFor={destSelectId} className="block text-xs text-nyx-muted mb-1">
-                    Destination Account (Target Credit)
+                    {t.transfers.destinationLabel}
                   </label>
                   <select
                     id={destSelectId}
@@ -769,7 +786,7 @@ export function FinancialDashboard(): React.JSX.Element {
 
                 <div>
                   <label htmlFor={transferAmountId} className="block text-xs text-nyx-muted mb-1">
-                    Transfer Amount (USD)
+                    {t.transfers.amountLabel}
                   </label>
                   <input
                     id={transferAmountId}
@@ -797,7 +814,7 @@ export function FinancialDashboard(): React.JSX.Element {
 
                 <div>
                   <label htmlFor={transferDescId} className="block text-xs text-nyx-muted mb-1">
-                    Operational Memo / Reference
+                    {t.transfers.descriptionLabel}
                   </label>
                   <input
                     id={transferDescId}
@@ -813,7 +830,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   disabled={submitting || accounts.length < 2}
                   className="w-full h-10 rounded bg-nyx-primary hover:bg-nyx-primary-hover text-white text-xs font-semibold transition disabled:opacity-50 mt-2"
                 >
-                  Commit Atomic Transfer
+                  {submitting ? t.transfers.executing : t.transfers.executeButton}
                 </button>
               </form>
             </div>
@@ -822,59 +839,68 @@ export function FinancialDashboard(): React.JSX.Element {
             <div className="p-5 rounded bg-nyx-card border border-nyx-border flex flex-col gap-4">
               <div>
                 <h2 className="text-base font-semibold text-nyx-text">
-                  Double-Entry Ledger Projection
+                  {t.transfers.previewTitle}
                 </h2>
-                <p className="text-xs text-nyx-muted mt-0.5">
-                  Mathematical projection committed atomically in a single transaction
-                </p>
+                <p className="text-xs text-nyx-muted mt-0.5">{t.transfers.terminalSubtitle}</p>
               </div>
 
               <div className="flex flex-col gap-3">
                 {/* Leg 1: Debit */}
                 <div className="p-3.5 rounded bg-nyx-sidebar border border-nyx-border flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-semibold text-[#f87171]">DEBIT ENTRY</div>
-                    <div className="text-xs text-nyx-text mt-0.5">
-                      {activeSourceAccount ? activeSourceAccount.accountNumber : 'Origin Account'}
+                    <div className="text-xs font-semibold text-[#f87171]">
+                      {t.transfers.debitTitle}
                     </div>
-                    <div className="text-[11px] text-nyx-muted">Liquidity Deduction</div>
+                    <div className="text-xs text-nyx-text mt-0.5">
+                      {activeSourceAccount
+                        ? activeSourceAccount.accountNumber
+                        : t.transfers.originLabel}
+                    </div>
+                    <div className="text-[11px] text-nyx-muted">{t.transfers.debitLeg}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-semibold text-[#f87171] tabular-nums">
                       - {formatMoney(transferCents)}
                     </div>
-                    <div className="text-[11px] text-nyx-muted">Posted immediately</div>
+                    <div className="text-[11px] text-nyx-muted">
+                      {t.transfers.postedImmediately}
+                    </div>
                   </div>
                 </div>
 
                 {/* Leg 2: Credit */}
                 <div className="p-3.5 rounded bg-nyx-sidebar border border-nyx-border flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-semibold text-[#4ade80]">CREDIT ENTRY</div>
-                    <div className="text-xs text-nyx-text mt-0.5">
-                      {activeDestAccount ? activeDestAccount.accountNumber : 'Target Account'}
+                    <div className="text-xs font-semibold text-[#4ade80]">
+                      {t.transfers.creditTitle}
                     </div>
-                    <div className="text-[11px] text-nyx-muted">Beneficiary Addition</div>
+                    <div className="text-xs text-nyx-text mt-0.5">
+                      {activeDestAccount
+                        ? activeDestAccount.accountNumber
+                        : t.transfers.destinationLabel}
+                    </div>
+                    <div className="text-[11px] text-nyx-muted">{t.transfers.creditLeg}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-semibold text-[#4ade80] tabular-nums">
                       + {formatMoney(transferCents)}
                     </div>
-                    <div className="text-[11px] text-nyx-muted">Posted immediately</div>
+                    <div className="text-[11px] text-nyx-muted">
+                      {t.transfers.postedImmediately}
+                    </div>
                   </div>
                 </div>
 
-                {/* Mathematical Check Card */}
+                {/* Transfer Fee Slip */}
                 <div className="p-3 rounded bg-nyx-background border border-nyx-border flex items-center justify-between text-xs">
-                  <span className="text-nyx-muted">Net Ledger Invariant:</span>
-                  <span className="text-nyx-highlight font-semibold tabular-nums">
-                    Σ Debits - Σ Credits = $0.00
+                  <span className="text-nyx-muted">{t.transfers.feeLabel}</span>
+                  <span className="text-[#4ade80] font-semibold tabular-nums">
+                    {t.transfers.feeFree}
                   </span>
                 </div>
 
                 <div className="text-xs text-nyx-muted leading-relaxed">
-                  Every transfer requires a unique idempotency key. If network disconnects midway,
-                  the operation returns the cached atomic result without double charging.
+                  {t.transfers.atomicInvariantNotice}
                 </div>
               </div>
             </div>
@@ -886,15 +912,13 @@ export function FinancialDashboard(): React.JSX.Element {
           <div className="flex flex-col gap-6">
             <div className="p-5 rounded bg-nyx-card border border-nyx-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-base font-semibold text-nyx-text">Automated Ledger Audit</h2>
-                <p className="text-xs text-nyx-muted mt-0.5">
-                  Audits account table balance against sum of historical double-entry entries
-                </p>
+                <h2 className="text-base font-semibold text-nyx-text">{t.reconciliation.title}</h2>
+                <p className="text-xs text-nyx-muted mt-0.5">{t.reconciliation.subtitle}</p>
               </div>
 
               <div className="flex items-center gap-3 w-full sm:w-auto">
                 <label htmlFor={auditSelectId} className="sr-only">
-                  Account to audit
+                  {t.reconciliation.selectLabel}
                 </label>
                 <select
                   id={auditSelectId}
@@ -916,7 +940,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   }}
                   className="h-9 px-4 rounded bg-nyx-primary hover:bg-nyx-primary-hover text-white text-xs font-medium transition shrink-0"
                 >
-                  Run Audit
+                  {t.reconciliation.runAuditButton}
                 </button>
               </div>
             </div>
@@ -929,24 +953,27 @@ export function FinancialDashboard(): React.JSX.Element {
                     <StatusBadge
                       status={reconciliationResult.isReconciled ? 'balanced' : 'discrepant'}
                       label={
-                        reconciliationResult.isReconciled ? 'AUDIT PASSED' : 'DISCREPANCY FOUND'
+                        reconciliationResult.isReconciled
+                          ? t.reconciliation.auditPassed
+                          : t.reconciliation.discrepancyFound
                       }
                     />
                     <span className="text-xs text-nyx-muted">
-                      Account{' '}
+                      {t.reconciliation.accountPrefix}{' '}
                       {targetReconciledAccount?.accountNumber ??
                         reconciliationResult.accountId.slice(0, 8)}
                     </span>
                   </div>
                   <span className="text-xs text-nyx-muted tabular-nums">
-                    Integrity status:{' '}
-                    {reconciliationResult.isReconciled ? 'Zero variance' : 'Discrepancy detected'}
+                    {reconciliationResult.isReconciled
+                      ? t.reconciliation.zeroVarianceStatus
+                      : t.reconciliation.discrepancyStatus}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                   <div className="p-4 rounded bg-nyx-sidebar border border-nyx-border">
-                    <div className="text-nyx-muted">Account Table Balance</div>
+                    <div className="text-nyx-muted">{t.reconciliation.tableBalance}</div>
                     <div className="text-lg font-semibold text-nyx-text mt-1 tabular-nums">
                       {formatMoney(
                         reconciliationResult.accountBalance,
@@ -956,7 +983,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   </div>
 
                   <div className="p-4 rounded bg-nyx-sidebar border border-nyx-border">
-                    <div className="text-nyx-muted">Ledger Derived Balance</div>
+                    <div className="text-nyx-muted">{t.reconciliation.derivedBalance}</div>
                     <div className="text-lg font-semibold text-nyx-text mt-1 tabular-nums">
                       {formatMoney(
                         reconciliationResult.ledgerDerivedBalance,
@@ -966,7 +993,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   </div>
 
                   <div className="p-4 rounded bg-nyx-sidebar border border-nyx-border">
-                    <div className="text-nyx-muted">Posted Debits / Credits</div>
+                    <div className="text-nyx-muted">{t.reconciliation.postedLegs}</div>
                     <div className="text-xs font-medium text-nyx-text mt-1.5 tabular-nums flex flex-col gap-0.5">
                       <span>
                         Dr:{' '}
@@ -986,7 +1013,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   </div>
 
                   <div className="p-4 rounded bg-nyx-sidebar border border-nyx-border">
-                    <div className="text-nyx-muted">Discrepancy (Variance)</div>
+                    <div className="text-nyx-muted">{t.reconciliation.discrepancy}</div>
                     <div
                       className={`text-lg font-semibold mt-1 tabular-nums ${
                         reconciliationResult.discrepancy === 0 ? 'text-[#4ade80]' : 'text-[#f87171]'
@@ -1002,8 +1029,7 @@ export function FinancialDashboard(): React.JSX.Element {
               </div>
             ) : (
               <div className="p-8 rounded border border-dashed border-nyx-border bg-nyx-card/30 text-center text-xs text-nyx-muted">
-                Select an account above and click &quot;Run Audit&quot; to verify ledger integrity
-                against recorded balance.
+                {t.reconciliation.emptyPrompt}
               </div>
             )}
           </div>
@@ -1013,24 +1039,19 @@ export function FinancialDashboard(): React.JSX.Element {
         {activeTab === 'outbox' && (
           <div className="flex flex-col gap-6">
             <div className="p-5 rounded bg-nyx-card border border-nyx-border">
-              <h2 className="text-base font-semibold text-nyx-text">
-                Transactional Outbox Event Stream
-              </h2>
-              <p className="text-xs text-nyx-muted mt-1 leading-relaxed">
-                Guarantees event notifications are committed atomically alongside ledger movements
-                and dispatched to subscribed endpoints with cryptographic verification.
-              </p>
+              <h2 className="text-base font-semibold text-nyx-text">{t.outbox.title}</h2>
+              <p className="text-xs text-nyx-muted mt-1 leading-relaxed">{t.outbox.subtitle}</p>
             </div>
 
             <div className="rounded bg-nyx-card border border-nyx-border overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-nyx-border bg-nyx-sidebar/60 text-nyx-muted">
-                    <th className="py-2.5 px-3 font-medium">Event Topic</th>
-                    <th className="py-2.5 px-3 font-medium">Payload Data</th>
-                    <th className="py-2.5 px-3 font-medium">HMAC Signature</th>
-                    <th className="py-2.5 px-3 font-medium text-right">Timestamp</th>
-                    <th className="py-2.5 px-3 font-medium text-right">Dispatch Status</th>
+                    <th className="py-2.5 px-3 font-medium">{t.outbox.thTopic}</th>
+                    <th className="py-2.5 px-3 font-medium">{t.outbox.thPayload}</th>
+                    <th className="py-2.5 px-3 font-medium">{t.outbox.thSignature}</th>
+                    <th className="py-2.5 px-3 font-medium text-right">{t.outbox.thTimestamp}</th>
+                    <th className="py-2.5 px-3 font-medium text-right">{t.outbox.thStatus}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-nyx-border/40">
@@ -1050,7 +1071,7 @@ export function FinancialDashboard(): React.JSX.Element {
                         {new Date(evt.timestamp).toLocaleTimeString()}
                       </td>
                       <td className="py-2.5 px-3 text-right">
-                        <StatusBadge status="settled" label="DISPATCHED" />
+                        <StatusBadge status="settled" label={t.outbox.statusDispatched} />
                       </td>
                     </tr>
                   ))}
