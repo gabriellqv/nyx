@@ -691,7 +691,7 @@ export function FinancialDashboard(): React.JSX.Element {
                         <th className="py-2.5 px-3 font-medium text-right">
                           {t.transfers.thAmount}
                         </th>
-                        <th className="py-2.5 px-3 font-medium text-center">Invariant</th>
+                        <th className="py-2.5 px-3 font-medium text-center">{t.transfers.thFee}</th>
                         <th className="py-2.5 px-3 font-medium text-right">
                           {t.transfers.thStatus}
                         </th>
@@ -719,7 +719,7 @@ export function FinancialDashboard(): React.JSX.Element {
                           </td>
                           <td className="py-2.5 px-3 text-center">
                             <span className="px-1.5 py-0.5 rounded text-[11px] bg-[#142328] text-[#4ade80] border border-[#224840]">
-                              Δ = $0.00
+                              {t.transfers.feeFree}
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-right">
@@ -848,9 +848,13 @@ export function FinancialDashboard(): React.JSX.Element {
                 {/* Leg 1: Debit */}
                 <div className="p-3.5 rounded bg-nyx-sidebar border border-nyx-border flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-semibold text-[#f87171]">DEBIT ENTRY</div>
+                    <div className="text-xs font-semibold text-[#f87171]">
+                      {t.transfers.debitTitle}
+                    </div>
                     <div className="text-xs text-nyx-text mt-0.5">
-                      {activeSourceAccount ? activeSourceAccount.accountNumber : 'Origin Account'}
+                      {activeSourceAccount
+                        ? activeSourceAccount.accountNumber
+                        : t.transfers.originLabel}
                     </div>
                     <div className="text-[11px] text-nyx-muted">{t.transfers.debitLeg}</div>
                   </div>
@@ -858,16 +862,22 @@ export function FinancialDashboard(): React.JSX.Element {
                     <div className="text-sm font-semibold text-[#f87171] tabular-nums">
                       - {formatMoney(transferCents)}
                     </div>
-                    <div className="text-[11px] text-nyx-muted">Posted immediately</div>
+                    <div className="text-[11px] text-nyx-muted">
+                      {t.transfers.postedImmediately}
+                    </div>
                   </div>
                 </div>
 
                 {/* Leg 2: Credit */}
                 <div className="p-3.5 rounded bg-nyx-sidebar border border-nyx-border flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-semibold text-[#4ade80]">CREDIT ENTRY</div>
+                    <div className="text-xs font-semibold text-[#4ade80]">
+                      {t.transfers.creditTitle}
+                    </div>
                     <div className="text-xs text-nyx-text mt-0.5">
-                      {activeDestAccount ? activeDestAccount.accountNumber : 'Target Account'}
+                      {activeDestAccount
+                        ? activeDestAccount.accountNumber
+                        : t.transfers.destinationLabel}
                     </div>
                     <div className="text-[11px] text-nyx-muted">{t.transfers.creditLeg}</div>
                   </div>
@@ -875,15 +885,17 @@ export function FinancialDashboard(): React.JSX.Element {
                     <div className="text-sm font-semibold text-[#4ade80] tabular-nums">
                       + {formatMoney(transferCents)}
                     </div>
-                    <div className="text-[11px] text-nyx-muted">Posted immediately</div>
+                    <div className="text-[11px] text-nyx-muted">
+                      {t.transfers.postedImmediately}
+                    </div>
                   </div>
                 </div>
 
-                {/* Mathematical Check Card */}
+                {/* Transfer Fee Slip */}
                 <div className="p-3 rounded bg-nyx-background border border-nyx-border flex items-center justify-between text-xs">
-                  <span className="text-nyx-muted">Net Ledger Invariant:</span>
-                  <span className="text-nyx-highlight font-semibold tabular-nums">
-                    Σ Debits - Σ Credits = $0.00
+                  <span className="text-nyx-muted">{t.transfers.feeLabel}</span>
+                  <span className="text-[#4ade80] font-semibold tabular-nums">
+                    {t.transfers.feeFree}
                   </span>
                 </div>
 

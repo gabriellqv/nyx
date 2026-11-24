@@ -58,6 +58,7 @@ export interface TranslationDictionary {
     thCredit: string;
     thAmount: string;
     thDescription: string;
+    thFee: string;
     thTime: string;
     thStatus: string;
     terminalTitle: string;
@@ -69,8 +70,13 @@ export interface TranslationDictionary {
     executeButton: string;
     executing: string;
     previewTitle: string;
+    debitTitle: string;
     debitLeg: string;
+    creditTitle: string;
     creditLeg: string;
+    postedImmediately: string;
+    feeLabel: string;
+    feeFree: string;
     atomicInvariantNotice: string;
     insufficientFunds: string;
     sameAccountError: string;
