@@ -12,12 +12,14 @@ import {
   createCustomerSchema,
   type CreateCustomerRequest,
   type CustomerResponse,
+  type UserProfile,
 } from '@nyx/contracts';
 import {
   CreateCustomerUseCase,
   GetCustomerUseCase,
   ListCustomersUseCase,
 } from '../application/use-cases/customer.use-cases';
+import { CurrentUser, Roles } from '../../auth/infrastructure/decorators/auth.decorators';
 
 @Controller('customers')
 export class CustomersController {
@@ -28,6 +30,7 @@ export class CustomersController {
   ) {}
 
   @Post()
+  @Roles('admin')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() body: unknown): Promise<CustomerResponse> {
     const parseResult = createCustomerSchema.safeParse(body);
@@ -38,12 +41,16 @@ export class CustomersController {
   }
 
   @Get()
+  @Roles('admin', 'auditor')
   async list(): Promise<CustomerResponse[]> {
     return this.listCustomersUseCase.execute();
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string): Promise<CustomerResponse> {
-    return this.getCustomerUseCase.execute(id);
+  async getById(
+    @Param('id') id: string,
+    @CurrentUser() user: UserProfile,
+  ): Promise<CustomerResponse> {
+    return this.getCustomerUseCase.execute(id, user);
   }
 }

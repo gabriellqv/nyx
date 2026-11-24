@@ -25,10 +25,3 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return super.canActivate(context);
   }
 }
-
-@Injectable()
-export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
-  override handleRequest<TUser = unknown>(_err: unknown, user: unknown): TUser {
-    return user as TUser;
-  }
-}

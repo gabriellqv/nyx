@@ -2,10 +2,10 @@ import { createParamDecorator, ExecutionContext, SetMetadata } from '@nestjs/com
 import type { UserRole, UserProfile } from '@nyx/contracts';
 
 export const IS_PUBLIC_KEY = 'isPublic';
-export const Public = (): MethodDecorator => SetMetadata(IS_PUBLIC_KEY, true);
+export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 
 export const ROLES_KEY = 'roles';
-export const Roles = (...roles: UserRole[]): MethodDecorator => SetMetadata(ROLES_KEY, roles);
+export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
 
 export const CurrentUser = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): UserProfile | undefined => {

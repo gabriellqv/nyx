@@ -18,8 +18,10 @@ import {
 } from '@nyx/contracts';
 import { WebhookService } from '../webhook.service';
 import { WebhookDispatcher, DispatchResult } from '../webhook-dispatcher.service';
+import { Roles } from '../../auth/infrastructure/decorators/auth.decorators';
 
 @Controller('webhooks')
+@Roles('admin')
 export class WebhooksController {
   constructor(
     private readonly webhookService: WebhookService,

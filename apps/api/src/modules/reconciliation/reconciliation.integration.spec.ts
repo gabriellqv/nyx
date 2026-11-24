@@ -5,10 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
+import { createTestAccessToken } from '../../testing/auth-test-helper';
 
 describe('Reconciliation Module Integration Tests', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let auditorToken: string;
   let customerId: string;
   let accountAId: string;
   let accountBId: string;
@@ -23,6 +25,7 @@ describe('Reconciliation Module Integration Tests', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    auditorToken = createTestAccessToken(app, { role: 'auditor' });
   });
 
   afterAll(async () => {
@@ -107,6 +110,7 @@ describe('Reconciliation Module Integration Tests', () => {
       // Execute a transfer from A to B (2,000 cents)
       await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${createTestAccessToken(app, { role: 'admin' })}`)
         .send({
           idempotencyKey: randomUUID(),
           sourceAccountId: accountAId,
@@ -119,6 +123,7 @@ describe('Reconciliation Module Integration Tests', () => {
       // Run reconciliation
       const res = await request(app.getHttpServer())
         .post('/reconciliation/run')
+        .set('Authorization', `Bearer ${auditorToken}`)
         .send({})
         .expect(200);
 
@@ -161,9 +166,15 @@ describe('Reconciliation Module Integration Tests', () => {
     });
 
     it('should support querying reconciliation history', async () => {
-      await request(app.getHttpServer()).post('/reconciliation/run').send({});
+      await request(app.getHttpServer())
+        .post('/reconciliation/run')
+        .set('Authorization', `Bearer ${auditorToken}`)
+        .send({});
 
-      const res = await request(app.getHttpServer()).get('/reconciliation/history').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/reconciliation/history')
+        .set('Authorization', `Bearer ${auditorToken}`)
+        .expect(200);
 
       expect(res.body.length).toBeGreaterThanOrEqual(1);
       expect(res.body[0]?.status).toBe('balanced');
@@ -181,6 +192,7 @@ describe('Reconciliation Module Integration Tests', () => {
       // Run reconciliation
       const res = await request(app.getHttpServer())
         .post('/reconciliation/run')
+        .set('Authorization', `Bearer ${auditorToken}`)
         .send({})
         .expect(200);
 

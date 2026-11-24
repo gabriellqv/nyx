@@ -18,6 +18,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { ObservabilityModule } from './modules/observability/observability.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { ObservabilityMiddleware } from './modules/observability/observability.middleware';
+import { JwtAuthGuard } from './modules/auth/infrastructure/guards/jwt-auth.guard';
+import { RolesGuard } from './modules/auth/infrastructure/guards/roles.guard';
 
 /**
  * Root application module orchestrating domain modules and core infrastructure.
@@ -52,6 +54,14 @@ import { ObservabilityMiddleware } from './modules/observability/observability.m
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })

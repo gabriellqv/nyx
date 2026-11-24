@@ -5,10 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
+import { createTestAccessToken } from '../../testing/auth-test-helper';
 
 describe('Financial Domain Integration Tests', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let adminToken: string;
 
   let customerId: string;
   let accountAId: string;
@@ -26,6 +28,7 @@ describe('Financial Domain Integration Tests', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    adminToken = createTestAccessToken(app, { role: 'admin' });
   });
 
   afterAll(async () => {
@@ -119,6 +122,7 @@ describe('Financial Domain Integration Tests', () => {
 
       const response = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -164,6 +168,7 @@ describe('Financial Domain Integration Tests', () => {
       // Verify ledger reconciliation endpoint
       const reconA = await request(app.getHttpServer())
         .get(`/accounts/${accountAId}/reconcile`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
       expect(reconA.body.isReconciled).toBe(true);
@@ -178,6 +183,7 @@ describe('Financial Domain Integration Tests', () => {
 
       const response = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -202,6 +208,7 @@ describe('Financial Domain Integration Tests', () => {
 
       const response = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountEurId,
@@ -219,6 +226,7 @@ describe('Financial Domain Integration Tests', () => {
 
       await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountAId,
@@ -238,6 +246,7 @@ describe('Financial Domain Integration Tests', () => {
       // First request
       const firstResponse = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -250,6 +259,7 @@ describe('Financial Domain Integration Tests', () => {
       // Second identical request
       const secondResponse = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -271,6 +281,7 @@ describe('Financial Domain Integration Tests', () => {
 
       await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -283,6 +294,7 @@ describe('Financial Domain Integration Tests', () => {
       // Re-send with altered amount
       await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -301,6 +313,7 @@ describe('Financial Domain Integration Tests', () => {
 
       const transferRes = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -315,6 +328,7 @@ describe('Financial Domain Integration Tests', () => {
       // Reverse transfer
       const reversalRes = await request(app.getHttpServer())
         .post(`/transfers/${transferId}/reverse`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           reason: 'Customer requested cancellation',
           idempotencyKey: randomUUID(),
@@ -352,13 +366,16 @@ describe('Financial Domain Integration Tests', () => {
       const concurrentRequests = 5;
 
       const requests = Array.from({ length: concurrentRequests }, () =>
-        request(app.getHttpServer()).post('/transfers').send({
-          sourceAccountId: accountDId,
-          destinationAccountId: accountBId,
-          amount: transferAmount,
-          currency: 'USD',
-          idempotencyKey: randomUUID(),
-        }),
+        request(app.getHttpServer())
+          .post('/transfers')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            sourceAccountId: accountDId,
+            destinationAccountId: accountBId,
+            amount: transferAmount,
+            currency: 'USD',
+            idempotencyKey: randomUUID(),
+          }),
       );
 
       const responses = await Promise.all(requests);

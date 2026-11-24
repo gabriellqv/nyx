@@ -16,6 +16,7 @@ import {
   type DepositRequest,
   type AccountResponse,
   type LedgerReconciliationResponse,
+  type UserProfile,
 } from '@nyx/contracts';
 import {
   CreateAccountUseCase,
@@ -24,6 +25,7 @@ import {
   DepositFundsUseCase,
   ReconcileAccountUseCase,
 } from '../application/use-cases/account.use-cases';
+import { CurrentUser, Roles } from '../../auth/infrastructure/decorators/auth.decorators';
 
 @Controller('accounts')
 export class AccountsController {
@@ -36,6 +38,7 @@ export class AccountsController {
   ) {}
 
   @Post()
+  @Roles('admin')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() body: unknown): Promise<AccountResponse> {
     const parseResult = createAccountSchema.safeParse(body);
@@ -46,16 +49,23 @@ export class AccountsController {
   }
 
   @Get()
-  async list(@Query('customerId') customerId?: string): Promise<AccountResponse[]> {
-    return this.listAccountsUseCase.execute(customerId);
+  async list(
+    @CurrentUser() user: UserProfile,
+    @Query('customerId') customerId?: string,
+  ): Promise<AccountResponse[]> {
+    return this.listAccountsUseCase.execute(user, customerId);
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string): Promise<AccountResponse> {
-    return this.getAccountUseCase.execute(id);
+  async getById(
+    @Param('id') id: string,
+    @CurrentUser() user: UserProfile,
+  ): Promise<AccountResponse> {
+    return this.getAccountUseCase.execute(id, user);
   }
 
   @Post(':id/deposit')
+  @Roles('admin')
   @HttpCode(HttpStatus.OK)
   async deposit(@Param('id') id: string, @Body() body: unknown): Promise<AccountResponse> {
     const parseResult = depositRequestSchema.safeParse(body);
@@ -66,7 +76,10 @@ export class AccountsController {
   }
 
   @Get(':id/reconcile')
-  async reconcile(@Param('id') id: string): Promise<LedgerReconciliationResponse> {
-    return this.reconcileAccountUseCase.execute(id);
+  async reconcile(
+    @Param('id') id: string,
+    @CurrentUser() user: UserProfile,
+  ): Promise<LedgerReconciliationResponse> {
+    return this.reconcileAccountUseCase.execute(id, user);
   }
 }

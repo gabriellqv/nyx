@@ -6,13 +6,14 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { CreatePaymentRequest, PaymentResponse } from '@nyx/contracts';
+import type { CreatePaymentRequest, PaymentResponse, UserProfile } from '@nyx/contracts';
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Payment } from '../../domain/entities/payment.entity';
 import { PAYMENT_REPOSITORY, IPaymentRepository } from '../ports/payment.repository';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { AuditService } from '../../../audit/audit.service';
 import { OutboxService } from '../../../outbox/outbox.service';
+import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
 
 interface LockedAccountRow {
   id: string;
@@ -200,13 +201,23 @@ export class GetPaymentUseCase {
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly paymentRepository: IPaymentRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
-  async execute(id: string): Promise<PaymentResponse> {
+  async execute(id: string, currentUser: UserProfile): Promise<PaymentResponse> {
     const payment = await this.paymentRepository.findById(id);
     if (!payment) {
       throw new NotFoundException(`Payment ${id} not found`);
     }
+
+    const account = await this.prisma.account.findUnique({
+      where: { id: payment.destinationAccountId },
+      select: { customerId: true },
+    });
+    if (!account) {
+      throw new NotFoundException(`Destination account ${payment.destinationAccountId} not found`);
+    }
+    assertCanReadCustomer(currentUser, account.customerId);
 
     return {
       id: payment.id,
@@ -228,9 +239,19 @@ export class ListPaymentsUseCase {
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly paymentRepository: IPaymentRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
-  async execute(accountId: string): Promise<PaymentResponse[]> {
+  async execute(accountId: string, currentUser: UserProfile): Promise<PaymentResponse[]> {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: { customerId: true },
+    });
+    if (!account) {
+      throw new NotFoundException(`Account ${accountId} not found`);
+    }
+    assertCanReadCustomer(currentUser, account.customerId);
+
     const payments = await this.paymentRepository.findByAccountId(accountId);
     return payments.map(payment => ({
       id: payment.id,

@@ -6,6 +6,8 @@ import type {
   CustomerResponse,
   TransferResponse,
   LedgerReconciliationResponse,
+  AuthResponse,
+  UserProfile,
 } from '@nyx/contracts';
 import {
   LedgerIcon,
@@ -42,6 +44,12 @@ export function FinancialDashboard(): React.JSX.Element {
 
   const [activeTab, setActiveTab] = useState<TabView>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [authenticating, setAuthenticating] = useState(false);
 
   const [_customers, setCustomers] = useState<CustomerResponse[]>([]);
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
@@ -93,12 +101,20 @@ export function FinancialDashboard(): React.JSX.Element {
     },
   ]);
 
+  const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
+    const headers = new Headers(init?.headers);
+    if (accessToken) {
+      headers.set('Authorization', `Bearer ${accessToken}`);
+    }
+    return fetch(url, { ...init, headers });
+  };
+
   const fetchData = async (): Promise<void> => {
     try {
       const [accRes, custRes, transRes] = await Promise.all([
-        fetch(`${API_URL}/accounts`).then(r => (r.ok ? r.json() : [])),
-        fetch(`${API_URL}/customers`).then(r => (r.ok ? r.json() : [])),
-        fetch(`${API_URL}/transfers`).then(r => (r.ok ? r.json() : [])),
+        apiFetch(`${API_URL}/accounts`).then(r => (r.ok ? r.json() : [])),
+        apiFetch(`${API_URL}/customers`).then(r => (r.ok ? r.json() : [])),
+        apiFetch(`${API_URL}/transfers`).then(r => (r.ok ? r.json() : [])),
       ]);
 
       setAccounts(accRes);
@@ -123,17 +139,105 @@ export function FinancialDashboard(): React.JSX.Element {
   };
 
   useEffect(() => {
-    void fetchData();
-  }, []);
+    if (accessToken) {
+      void fetchData();
+    }
+  }, [accessToken]);
+
+  const handleLogin = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    setAuthenticating(true);
+    setLoginError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      if (!response.ok) {
+        throw new Error(t.auth.invalidCredentials);
+      }
+
+      const auth: AuthResponse = await response.json();
+      setAccessToken(auth.accessToken);
+      setCurrentUser(auth.user);
+      setLoginPassword('');
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : t.auth.invalidCredentials);
+    } finally {
+      setAuthenticating(false);
+    }
+  };
+
+  if (!accessToken) {
+    return (
+      <main className="min-h-dvh bg-nyx-background text-nyx-text flex items-center justify-center p-4">
+        <section className="w-full max-w-sm rounded bg-nyx-card border border-nyx-border p-6">
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div>
+              <NyxLogo height={24} />
+              <h1 className="text-lg font-semibold mt-5">{t.auth.title}</h1>
+              <p className="text-xs text-nyx-muted mt-1">{t.auth.subtitle}</p>
+            </div>
+            <LanguageSwitch />
+          </div>
+
+          <form onSubmit={handleLogin} className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="login-email" className="block text-xs text-nyx-muted mb-1">
+                {t.auth.email}
+              </label>
+              <input
+                id="login-email"
+                type="email"
+                required
+                autoComplete="username"
+                value={loginEmail}
+                onChange={event => setLoginEmail(event.target.value)}
+                className="w-full h-10 px-3 rounded bg-nyx-sidebar border border-nyx-border text-sm focus:outline-none focus:border-nyx-highlight"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="login-password" className="block text-xs text-nyx-muted mb-1">
+                {t.auth.password}
+              </label>
+              <input
+                id="login-password"
+                type="password"
+                required
+                autoComplete="current-password"
+                value={loginPassword}
+                onChange={event => setLoginPassword(event.target.value)}
+                className="w-full h-10 px-3 rounded bg-nyx-sidebar border border-nyx-border text-sm focus:outline-none focus:border-nyx-highlight"
+              />
+            </div>
+
+            {loginError && <p className="text-xs text-[#f87171]">{loginError}</p>}
+
+            <button
+              type="submit"
+              disabled={authenticating}
+              className="h-10 rounded bg-nyx-primary hover:bg-nyx-primary-hover text-white text-sm font-medium disabled:opacity-50"
+            >
+              {authenticating ? t.auth.signingIn : t.auth.signIn}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   const totalCustodyBalance = accounts.reduce((acc, curr) => acc + (curr.balance ?? 0), 0);
+  const isAdmin = currentUser?.role === 'admin';
 
   const handleSeedInitialData = async (): Promise<void> => {
     setSubmitting(true);
     setActionNotice(null);
     try {
       // 1. Create Corporate Customer
-      const custRes = await fetch(`${API_URL}/customers`, {
+      const custRes = await apiFetch(`${API_URL}/customers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -147,37 +251,35 @@ export function FinancialDashboard(): React.JSX.Element {
       const customer: CustomerResponse = await custRes.json();
 
       // 2. Create Primary Treasury Operating Account ($1,000.00 USD)
-      const acc1Res = await fetch(`${API_URL}/accounts`, {
+      const acc1Res = await apiFetch(`${API_URL}/accounts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: customer.id,
-          accountNumber: `ACC-AUR-${Math.floor(1000 + Math.random() * 9000)}`,
           currency: 'USD',
-          type: 'operating',
-          initialBalance: 100000,
+          type: 'checking',
+          initialDeposit: 100000,
         }),
       });
       if (!acc1Res.ok) throw new Error('Primary account provisioning rejected');
       const acc1: AccountResponse = await acc1Res.json();
 
       // 3. Create Liquidity Clearing Account ($500.00 USD)
-      const acc2Res = await fetch(`${API_URL}/accounts`, {
+      const acc2Res = await apiFetch(`${API_URL}/accounts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: customer.id,
-          accountNumber: `ACC-CLR-${Math.floor(1000 + Math.random() * 9000)}`,
           currency: 'USD',
-          type: 'settlement',
-          initialBalance: 50000,
+          type: 'savings',
+          initialDeposit: 50000,
         }),
       });
       if (!acc2Res.ok) throw new Error('Clearing account provisioning rejected');
       const acc2: AccountResponse = await acc2Res.json();
 
       // 4. Execute Demonstration Atomic Transfer ($150.00 USD)
-      await fetch(`${API_URL}/transfers`, {
+      await apiFetch(`${API_URL}/transfers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -227,7 +329,7 @@ export function FinancialDashboard(): React.JSX.Element {
     const idempotencyKey = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     try {
-      const res = await fetch(`${API_URL}/transfers`, {
+      const res = await apiFetch(`${API_URL}/transfers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -279,7 +381,7 @@ export function FinancialDashboard(): React.JSX.Element {
     const idempotencyKey = `dep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     try {
-      const res = await fetch(`${API_URL}/accounts/${depositAccountId}/deposit`, {
+      const res = await apiFetch(`${API_URL}/accounts/${depositAccountId}/deposit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -315,7 +417,7 @@ export function FinancialDashboard(): React.JSX.Element {
 
   const handleReconcile = async (accountId: string): Promise<void> => {
     try {
-      const res = await fetch(`${API_URL}/accounts/${accountId}/reconcile`);
+      const res = await apiFetch(`${API_URL}/accounts/${accountId}/reconcile`);
       if (res.ok) {
         const data: LedgerReconciliationResponse = await res.json();
         setReconciliationResult(data);
@@ -467,6 +569,16 @@ export function FinancialDashboard(): React.JSX.Element {
             <StatusBadge status="ok" label={t.header.coreOperational} />
             <button
               type="button"
+              onClick={() => {
+                setAccessToken(null);
+                setCurrentUser(null);
+              }}
+              className="px-3 py-1.5 rounded text-xs border border-nyx-border text-nyx-muted hover:text-nyx-text"
+            >
+              {t.auth.signOut}
+            </button>
+            <button
+              type="button"
               onClick={() => void fetchData()}
               disabled={loading}
               className="p-1.5 rounded bg-nyx-card border border-nyx-border text-nyx-muted hover:text-nyx-text transition"
@@ -474,15 +586,17 @@ export function FinancialDashboard(): React.JSX.Element {
             >
               <RefreshIcon size={14} className={loading ? 'animate-spin' : ''} />
             </button>
-            <button
-              type="button"
-              onClick={() => void handleSeedInitialData()}
-              disabled={submitting}
-              className="px-3 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <PlusIcon size={14} />
-              <span>{submitting ? t.header.seeding : t.header.seedDemo}</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => void handleSeedInitialData()}
+                disabled={submitting}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <PlusIcon size={14} />
+                <span>{submitting ? t.header.seeding : t.header.seedDemo}</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -560,14 +674,16 @@ export function FinancialDashboard(): React.JSX.Element {
               {accounts.length === 0 ? (
                 <div className="p-8 rounded border border-dashed border-nyx-border bg-nyx-card/30 text-center flex flex-col items-center justify-center gap-3">
                   <div className="text-sm text-nyx-muted max-w-sm">{t.accounts.emptyText}</div>
-                  <button
-                    type="button"
-                    onClick={() => void handleSeedInitialData()}
-                    disabled={submitting}
-                    className="px-3.5 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition"
-                  >
-                    {t.accounts.seedButton}
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => void handleSeedInitialData()}
+                      disabled={submitting}
+                      className="px-3.5 py-1.5 rounded text-xs font-medium bg-nyx-primary hover:bg-nyx-primary-hover text-white transition"
+                    >
+                      {t.accounts.seedButton}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -621,57 +737,58 @@ export function FinancialDashboard(): React.JSX.Element {
               )}
             </section>
 
-            {/* Quick Liquidity Injection Form */}
-            <section className="p-5 rounded bg-nyx-card border border-nyx-border">
-              <h2 className="text-sm font-semibold text-nyx-text mb-3">
-                {t.accounts.depositSectionTitle}
-              </h2>
-              <form
-                onSubmit={handleDepositFunds}
-                className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"
-              >
-                <div>
-                  <label htmlFor={depositSelectId} className="block text-xs text-nyx-muted mb-1">
-                    {t.accounts.targetAccountLabel}
-                  </label>
-                  <select
-                    id={depositSelectId}
-                    value={depositAccountId}
-                    onChange={e => setDepositAccountId(e.target.value)}
-                    className="w-full h-9 px-2.5 rounded bg-nyx-sidebar border border-nyx-border text-xs text-nyx-text focus:outline-none focus:border-nyx-highlight"
-                  >
-                    {accounts.map(acc => (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.accountNumber} ({formatMoney(acc.balance, acc.currency)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label htmlFor={depositAmountId} className="block text-xs text-nyx-muted mb-1">
-                    {t.accounts.depositAmountLabel}
-                  </label>
-                  <input
-                    id={depositAmountId}
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    value={depositAmount}
-                    onChange={e => setDepositAmount(e.target.value)}
-                    className="w-full h-9 px-2.5 rounded bg-nyx-sidebar border border-nyx-border text-xs text-nyx-text tabular-nums focus:outline-none focus:border-nyx-highlight"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitting || accounts.length === 0}
-                  className="h-9 px-4 rounded bg-nyx-primary hover:bg-nyx-primary-hover text-white text-xs font-medium transition disabled:opacity-50"
+            {isAdmin && (
+              <section className="p-5 rounded bg-nyx-card border border-nyx-border">
+                <h2 className="text-sm font-semibold text-nyx-text mb-3">
+                  {t.accounts.depositSectionTitle}
+                </h2>
+                <form
+                  onSubmit={handleDepositFunds}
+                  className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"
                 >
-                  {submitting ? t.accounts.depositing : t.accounts.depositButton}
-                </button>
-              </form>
-            </section>
+                  <div>
+                    <label htmlFor={depositSelectId} className="block text-xs text-nyx-muted mb-1">
+                      {t.accounts.targetAccountLabel}
+                    </label>
+                    <select
+                      id={depositSelectId}
+                      value={depositAccountId}
+                      onChange={e => setDepositAccountId(e.target.value)}
+                      className="w-full h-9 px-2.5 rounded bg-nyx-sidebar border border-nyx-border text-xs text-nyx-text focus:outline-none focus:border-nyx-highlight"
+                    >
+                      {accounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.accountNumber} ({formatMoney(acc.balance, acc.currency)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor={depositAmountId} className="block text-xs text-nyx-muted mb-1">
+                      {t.accounts.depositAmountLabel}
+                    </label>
+                    <input
+                      id={depositAmountId}
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={depositAmount}
+                      onChange={e => setDepositAmount(e.target.value)}
+                      className="w-full h-9 px-2.5 rounded bg-nyx-sidebar border border-nyx-border text-xs text-nyx-text tabular-nums focus:outline-none focus:border-nyx-highlight"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submitting || accounts.length === 0}
+                    className="h-9 px-4 rounded bg-nyx-primary hover:bg-nyx-primary-hover text-white text-xs font-medium transition disabled:opacity-50"
+                  >
+                    {submitting ? t.accounts.depositing : t.accounts.depositButton}
+                  </button>
+                </form>
+              </section>
+            )}
 
             {/* Recent Double-Entry Transfers Stream */}
             <section className="flex flex-col gap-3">

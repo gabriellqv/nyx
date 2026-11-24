@@ -7,6 +7,16 @@ export interface TranslationDictionary {
     tagline: string;
     coreBanking: string;
   };
+  auth: {
+    title: string;
+    subtitle: string;
+    email: string;
+    password: string;
+    signIn: string;
+    signingIn: string;
+    invalidCredentials: string;
+    signOut: string;
+  };
   nav: {
     overview: string;
     transfers: string;

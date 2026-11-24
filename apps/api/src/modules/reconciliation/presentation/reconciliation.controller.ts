@@ -5,8 +5,10 @@ import {
   type ReconciliationReport,
 } from '@nyx/contracts';
 import { ReconciliationService } from '../reconciliation.service';
+import { Roles } from '../../auth/infrastructure/decorators/auth.decorators';
 
 @Controller('reconciliation')
+@Roles('admin', 'auditor')
 export class ReconciliationController {
   constructor(private readonly reconciliationService: ReconciliationService) {}
 

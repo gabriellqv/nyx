@@ -16,8 +16,6 @@ export const registerUserSchema = z.object({
     .string()
     .min(8, { message: 'Password must be at least 8 characters long' })
     .max(128, { message: 'Password cannot exceed 128 characters' }),
-  role: userRoleSchema.default('user'),
-  customerId: z.string().uuid().optional(),
 });
 export type RegisterUserRequest = z.infer<typeof registerUserSchema>;
 

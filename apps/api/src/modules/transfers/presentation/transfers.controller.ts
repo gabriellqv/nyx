@@ -8,7 +8,6 @@ import {
   HttpStatus,
   HttpCode,
   BadRequestException,
-  UseGuards,
 } from '@nestjs/common';
 import {
   createTransferSchema,
@@ -24,8 +23,7 @@ import {
   ListTransfersUseCase,
   ReverseTransferUseCase,
 } from '../application/use-cases/transfer.use-cases';
-import { CurrentUser } from '../../auth/infrastructure/decorators/auth.decorators';
-import { OptionalJwtAuthGuard } from '../../auth/infrastructure/guards/jwt-auth.guard';
+import { CurrentUser, Roles } from '../../auth/infrastructure/decorators/auth.decorators';
 
 @Controller('transfers')
 export class TransfersController {
@@ -36,13 +34,10 @@ export class TransfersController {
     private readonly reverseTransferUseCase: ReverseTransferUseCase,
   ) {}
 
-  @UseGuards(OptionalJwtAuthGuard)
   @Post()
+  @Roles('user', 'admin')
   @HttpCode(HttpStatus.CREATED)
-  async create(
-    @Body() body: unknown,
-    @CurrentUser() user?: UserProfile,
-  ): Promise<TransferResponse> {
+  async create(@Body() body: unknown, @CurrentUser() user: UserProfile): Promise<TransferResponse> {
     const parseResult = createTransferSchema.safeParse(body);
     if (!parseResult.success) {
       throw new BadRequestException(parseResult.error.format());
@@ -52,18 +47,23 @@ export class TransfersController {
 
   @Get()
   async list(
+    @CurrentUser() user: UserProfile,
     @Query('accountId') accountId?: string,
     @Query('status') status?: string,
   ): Promise<TransferResponse[]> {
-    return this.listTransfersUseCase.execute({ accountId, status });
+    return this.listTransfersUseCase.execute(user, { accountId, status });
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string): Promise<TransferResponse> {
-    return this.getTransferUseCase.execute(id);
+  async getById(
+    @Param('id') id: string,
+    @CurrentUser() user: UserProfile,
+  ): Promise<TransferResponse> {
+    return this.getTransferUseCase.execute(id, user);
   }
 
   @Post(':id/reverse')
+  @Roles('admin')
   @HttpCode(HttpStatus.OK)
   async reverse(@Param('id') id: string, @Body() body: unknown): Promise<TransferResponse> {
     const parseResult = reverseTransferSchema.safeParse(body);

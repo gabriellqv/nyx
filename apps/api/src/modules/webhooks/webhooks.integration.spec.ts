@@ -7,10 +7,12 @@ import type { AddressInfo } from 'node:net';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
+import { createTestAccessToken } from '../../testing/auth-test-helper';
 
 describe('Webhooks and Transactional Outbox Integration Tests', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let adminToken: string;
   let mockServer: http.Server;
   let mockServerUrl: string;
   let receivedRequests: Array<{
@@ -49,6 +51,7 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    adminToken = createTestAccessToken(app, { role: 'admin' });
   });
 
   afterAll(async () => {
@@ -75,6 +78,7 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
     it('should register a webhook endpoint and return its signing secret', async () => {
       const res = await request(app.getHttpServer())
         .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           url: mockServerUrl,
           events: ['transfer.posted', 'payment.completed'],
@@ -92,12 +96,16 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
     it('should list registered webhook endpoints', async () => {
       await request(app.getHttpServer())
         .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           url: mockServerUrl,
           events: ['*'],
         });
 
-      const res = await request(app.getHttpServer()).get('/webhooks/endpoints').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
 
       expect(res.body.length).toBe(1);
       expect(res.body[0]?.url).toBe(mockServerUrl);
@@ -111,6 +119,7 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       // 1. Register subscriber endpoint
       const endpointRes = await request(app.getHttpServer())
         .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           url: mockServerUrl,
           secret,
@@ -156,6 +165,7 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       // 3. Execute a transfer, which creates an OutboxEvent atomically
       const transferRes = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           idempotencyKey: randomUUID(),
           sourceAccountId: accAId,
@@ -173,7 +183,10 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       expect(outboxBefore?.status).toBe('pending');
 
       // 4. Trigger webhook dispatcher
-      const dispatchRes = await request(app.getHttpServer()).post('/webhooks/dispatch').expect(200);
+      const dispatchRes = await request(app.getHttpServer())
+        .post('/webhooks/dispatch')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
 
       expect(dispatchRes.body.processedCount).toBeGreaterThanOrEqual(1);
 
@@ -223,6 +236,7 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       // Register an endpoint with an unreachable port
       const endpointRes = await request(app.getHttpServer())
         .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           url: 'http://127.0.0.1:59999/unreachable',
           events: ['transfer.posted'],
@@ -245,7 +259,10 @@ describe('Webhooks and Transactional Outbox Integration Tests', () => {
       });
 
       // Dispatch
-      await request(app.getHttpServer()).post('/webhooks/dispatch').expect(200);
+      await request(app.getHttpServer())
+        .post('/webhooks/dispatch')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
 
       // Verify outbox event was marked pending with incremented retry count
       const eventAfter = await prisma.outboxEvent.findUnique({ where: { id: eventId } });

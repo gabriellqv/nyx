@@ -7,6 +7,16 @@ export const en: TranslationDictionary = {
     tagline: 'Banking Platform & Accounts',
     coreBanking: 'Institutional Online Banking',
   },
+  auth: {
+    title: 'Operator access',
+    subtitle: 'Sign in with an authorized NYX account.',
+    email: 'Email',
+    password: 'Password',
+    signIn: 'Sign in',
+    signingIn: 'Signing in...',
+    invalidCredentials: 'Invalid email or password',
+    signOut: 'Sign out',
+  },
   nav: {
     overview: 'Accounts & Balances',
     transfers: 'Transfers',
