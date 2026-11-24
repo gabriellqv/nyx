@@ -9,7 +9,13 @@ export type LedgerEntryType = z.infer<typeof ledgerEntryTypeSchema>;
 /**
  * Business event originating the ledger posting.
  */
-export const ledgerReferenceTypeSchema = z.enum(['transfer', 'deposit', 'reversal', 'adjustment']);
+export const ledgerReferenceTypeSchema = z.enum([
+  'transfer',
+  'deposit',
+  'payment',
+  'reversal',
+  'adjustment',
+]);
 export type LedgerReferenceType = z.infer<typeof ledgerReferenceTypeSchema>;
 
 /**
@@ -18,7 +24,8 @@ export type LedgerReferenceType = z.infer<typeof ledgerReferenceTypeSchema>;
 export const ledgerEntryResponseSchema = z.object({
   id: z.string().uuid(),
   transactionId: z.string().uuid(),
-  accountId: z.string().uuid(),
+  accountId: z.string().uuid().nullable(),
+  ledgerAccountId: z.string().uuid().nullable().optional(),
   entryType: ledgerEntryTypeSchema,
   amount: z.number().int().positive(),
   currency: z.string().length(3),

@@ -21,7 +21,7 @@ This is a personal project, not a product in production. It runs end to end loca
 
 ### Double-entry ledger
 
-Every movement is a `LedgerTransaction` with at least two `LedgerEntry` rows, and the sum of debits must equal the sum of credits. Balances are computed from entries. There is no code path that writes a balance directly.
+Every movement is a `LedgerTransaction` with at least two `LedgerEntry` rows, and the database rejects unbalanced postings. Customer account balances are transactionally updated projections that are reconciled against ledger entries; they are not the accounting source of truth. Internal clearing accounts are currency-specific ledger accounts, not customer accounts.
 
 ### Concurrency control
 

@@ -199,6 +199,7 @@ export class ExecuteTransferUseCase {
             create: ledgerTx.entries.map(e => ({
               id: e.id,
               accountId: e.accountId,
+              ledgerAccountId: e.ledgerAccountId,
               entryType: e.entryType,
               amount: e.amount.amount,
               currency: e.amount.currency,
@@ -469,6 +470,7 @@ export class ReverseTransferUseCase {
             create: reversalLedgerTx.entries.map(e => ({
               id: e.id,
               accountId: e.accountId,
+              ledgerAccountId: e.ledgerAccountId,
               entryType: e.entryType,
               amount: e.amount.amount,
               currency: e.amount.currency,

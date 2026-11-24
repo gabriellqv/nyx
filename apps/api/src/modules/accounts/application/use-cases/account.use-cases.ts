@@ -57,31 +57,6 @@ export class CreateAccountUseCase {
     });
 
     if (initialAmount.isPositive()) {
-      // Find or create internal vault/treasury account for double-entry balancing
-      let treasury = await this.accountRepository.findByAccountNumber('ACC-TREASURY');
-      if (!treasury) {
-        treasury = new Account({
-          id: randomUUID(),
-          customerId: customer.id,
-          accountNumber: 'ACC-TREASURY',
-          currency: dto.currency,
-          type: 'internal',
-          status: 'active',
-          balance: Money.zero(dto.currency),
-        });
-        await this.accountRepository.save(treasury);
-      }
-
-      const ledgerTx = this.doubleEntryService.createTransaction({
-        description: `Initial deposit for ${accountNumber}`,
-        referenceType: 'deposit',
-        referenceId: accountId,
-        entries: [
-          { accountId: treasury.id, entryType: 'debit', amount: initialAmount },
-          { accountId: account.id, entryType: 'credit', amount: initialAmount },
-        ],
-      });
-
       await this.prisma.$transaction(async tx => {
         await tx.account.create({
           data: {
@@ -96,6 +71,28 @@ export class CreateAccountUseCase {
           },
         });
 
+        const openingFunds = await tx.ledgerAccount.upsert({
+          where: { code_currency: { code: 'opening-funds', currency: dto.currency } },
+          create: {
+            id: randomUUID(),
+            code: 'opening-funds',
+            name: 'Opening funds clearing',
+            currency: dto.currency,
+            accountType: 'asset',
+          },
+          update: {},
+        });
+
+        const ledgerTx = this.doubleEntryService.createTransaction({
+          description: `Initial deposit for ${accountNumber}`,
+          referenceType: 'deposit',
+          referenceId: accountId,
+          entries: [
+            { ledgerAccountId: openingFunds.id, entryType: 'debit', amount: initialAmount },
+            { accountId: account.id, entryType: 'credit', amount: initialAmount },
+          ],
+        });
+
         await tx.ledgerTransaction.create({
           data: {
             id: ledgerTx.id,
@@ -106,6 +103,7 @@ export class CreateAccountUseCase {
               create: ledgerTx.entries.map(e => ({
                 id: e.id,
                 accountId: e.accountId,
+                ledgerAccountId: e.ledgerAccountId,
                 entryType: e.entryType,
                 amount: e.amount.amount,
                 currency: e.amount.currency,
@@ -238,31 +236,6 @@ export class DepositFundsUseCase {
 
     const depositAmount = Money.fromCents(dto.amount, account.currency);
 
-    // Retrieve or provision internal treasury account
-    let treasury = await this.accountRepository.findByAccountNumber('ACC-TREASURY');
-    if (!treasury) {
-      treasury = new Account({
-        id: randomUUID(),
-        customerId: account.customerId,
-        accountNumber: 'ACC-TREASURY',
-        currency: account.currency,
-        type: 'internal',
-        status: 'active',
-        balance: Money.zero(account.currency),
-      });
-      await this.accountRepository.save(treasury);
-    }
-
-    const ledgerTx = this.doubleEntryService.createTransaction({
-      description: dto.description ?? `Deposit to ${account.accountNumber}`,
-      referenceType: 'deposit',
-      referenceId: account.id,
-      entries: [
-        { accountId: treasury.id, entryType: 'debit', amount: depositAmount },
-        { accountId: account.id, entryType: 'credit', amount: depositAmount },
-      ],
-    });
-
     await this.prisma.$transaction(async tx => {
       // Row level lock on account to prevent concurrent modifications
       const [lockedAccount] = await tx.$queryRaw<
@@ -286,6 +259,28 @@ export class DepositFundsUseCase {
         },
       });
 
+      const cashClearing = await tx.ledgerAccount.upsert({
+        where: { code_currency: { code: 'cash-clearing', currency: account.currency } },
+        create: {
+          id: randomUUID(),
+          code: 'cash-clearing',
+          name: 'Manual cash deposit clearing',
+          currency: account.currency,
+          accountType: 'asset',
+        },
+        update: {},
+      });
+
+      const ledgerTx = this.doubleEntryService.createTransaction({
+        description: dto.description ?? `Deposit to ${account.accountNumber}`,
+        referenceType: 'deposit',
+        referenceId: account.id,
+        entries: [
+          { ledgerAccountId: cashClearing.id, entryType: 'debit', amount: depositAmount },
+          { accountId: account.id, entryType: 'credit', amount: depositAmount },
+        ],
+      });
+
       await tx.ledgerTransaction.create({
         data: {
           id: ledgerTx.id,
@@ -296,6 +291,7 @@ export class DepositFundsUseCase {
             create: ledgerTx.entries.map(e => ({
               id: e.id,
               accountId: e.accountId,
+              ledgerAccountId: e.ledgerAccountId,
               entryType: e.entryType,
               amount: e.amount.amount,
               currency: e.amount.currency,

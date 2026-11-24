@@ -7,8 +7,10 @@ import {
   ListPaymentsUseCase,
 } from './application/use-cases/payment.use-cases';
 import { PaymentsController } from './presentation/payments.controller';
+import { LedgerModule } from '../ledger/ledger.module';
 
 @Module({
+  imports: [LedgerModule],
   controllers: [PaymentsController],
   providers: [
     {

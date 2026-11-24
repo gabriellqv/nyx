@@ -38,8 +38,7 @@ describe('Financial Domain Integration Tests', () => {
 
   beforeEach(async () => {
     // Clear financial tables in correct dependency order
-    await prisma.ledgerEntry.deleteMany();
-    await prisma.ledgerTransaction.deleteMany();
+    await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
     await prisma.transfer.deleteMany();
     await prisma.account.deleteMany();
     await prisma.customer.deleteMany();
@@ -75,6 +74,18 @@ describe('Financial Domain Integration Tests', () => {
       });
 
       if (balance > 0n) {
+        const openingFunds = await prisma.ledgerAccount.upsert({
+          where: { code_currency: { code: 'opening-funds', currency } },
+          create: {
+            id: randomUUID(),
+            code: 'opening-funds',
+            name: 'Opening funds clearing',
+            currency,
+            accountType: 'asset',
+          },
+          update: {},
+        });
+
         await prisma.ledgerTransaction.create({
           data: {
             id: randomUUID(),
@@ -85,11 +96,19 @@ describe('Financial Domain Integration Tests', () => {
               create: [
                 {
                   id: randomUUID(),
+                  ledgerAccountId: openingFunds.id,
+                  entryType: 'debit',
+                  amount: balance,
+                  currency,
+                  sequenceNumber: 1,
+                },
+                {
+                  id: randomUUID(),
                   accountId: id,
                   entryType: 'credit',
                   amount: balance,
                   currency,
-                  sequenceNumber: 1,
+                  sequenceNumber: 2,
                 },
               ],
             },

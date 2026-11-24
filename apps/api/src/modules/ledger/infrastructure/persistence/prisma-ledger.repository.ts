@@ -24,6 +24,7 @@ export class PrismaLedgerRepository implements ILedgerRepository {
           create: transaction.entries.map(e => ({
             id: e.id,
             accountId: e.accountId,
+            ledgerAccountId: e.ledgerAccountId,
             entryType: e.entryType,
             amount: e.amount.amount,
             currency: e.amount.currency,
@@ -57,6 +58,7 @@ export class PrismaLedgerRepository implements ILedgerRepository {
             id: e.id,
             transactionId: e.transactionId,
             accountId: e.accountId,
+            ledgerAccountId: e.ledgerAccountId,
             entryType: e.entryType as LedgerEntryType,
             amount: Money.fromCents(e.amount, e.currency),
             sequenceNumber: e.sequenceNumber,
@@ -78,6 +80,7 @@ export class PrismaLedgerRepository implements ILedgerRepository {
           id: e.id,
           transactionId: e.transactionId,
           accountId: e.accountId,
+          ledgerAccountId: e.ledgerAccountId,
           entryType: e.entryType as LedgerEntryType,
           amount: Money.fromCents(e.amount, e.currency),
           sequenceNumber: e.sequenceNumber,

@@ -14,6 +14,7 @@ import { PrismaService } from '../../../../infrastructure/database/prisma.servic
 import { AuditService } from '../../../audit/audit.service';
 import { OutboxService } from '../../../outbox/outbox.service';
 import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
+import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 
 interface LockedAccountRow {
   id: string;
@@ -33,6 +34,7 @@ export class ProcessPaymentUseCase {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly outboxService: OutboxService,
+    private readonly doubleEntryService: DoubleEntryLedgerService,
   ) {}
 
   async execute(dto: CreatePaymentRequest): Promise<PaymentResponse> {
@@ -94,25 +96,42 @@ export class ProcessPaymentUseCase {
         },
       });
 
-      // Record ledger transaction
-      const transactionId = randomUUID();
+      const clearingAccount = await tx.ledgerAccount.upsert({
+        where: { code_currency: { code: 'payment-clearing', currency: paymentAmount.currency } },
+        create: {
+          id: randomUUID(),
+          code: 'payment-clearing',
+          name: 'Incoming payment clearing',
+          currency: paymentAmount.currency,
+          accountType: 'asset',
+        },
+        update: {},
+      });
+
+      const ledgerTransaction = this.doubleEntryService.createIncomingPaymentTransaction({
+        paymentId,
+        destinationAccountId: accountRow.id,
+        clearingLedgerAccountId: clearingAccount.id,
+        amount: paymentAmount,
+        description: `Payment received via ${dto.method}: ${dto.description ?? 'incoming funds'}`,
+      });
+
       await tx.ledgerTransaction.create({
         data: {
-          id: transactionId,
-          description: `Payment received via ${dto.method}: ${dto.description ?? 'incoming funds'}`,
-          referenceType: 'payment',
-          referenceId: paymentId,
+          id: ledgerTransaction.id,
+          description: ledgerTransaction.description,
+          referenceType: ledgerTransaction.referenceType,
+          referenceId: ledgerTransaction.referenceId,
           entries: {
-            create: [
-              {
-                id: randomUUID(),
-                accountId: accountRow.id,
-                entryType: 'credit',
-                amount: paymentAmount.amount,
-                currency: paymentAmount.currency,
-                sequenceNumber: 1,
-              },
-            ],
+            create: ledgerTransaction.entries.map(entry => ({
+              id: entry.id,
+              accountId: entry.accountId,
+              ledgerAccountId: entry.ledgerAccountId,
+              entryType: entry.entryType,
+              amount: entry.amount.amount,
+              currency: entry.amount.currency,
+              sequenceNumber: entry.sequenceNumber,
+            })),
           },
         },
       });
