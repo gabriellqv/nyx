@@ -217,25 +217,25 @@ resource "random_password" "db_password" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier                  = "${var.project_name}-${var.environment}-postgres"
-  engine                      = "postgres"
-  engine_version              = "16.2"
-  instance_class              = var.db_instance_class
-  allocated_storage           = var.db_allocated_storage
-  max_allocated_storage       = 100
-  storage_type                = "gp3"
-  storage_encrypted           = true
-  db_name                     = "nyx_${var.environment}"
-  username                    = "nyx_admin"
-  password                    = random_password.db_password.result
-  db_subnet_group_name        = aws_db_subnet_group.main.name
-  vpc_security_group_ids      = [aws_security_group.db.id]
-  multi_az                    = var.multi_az
-  backup_retention_period     = var.backup_retention_period
-  skip_final_snapshot         = var.environment == "staging"
-  final_snapshot_identifier   = "${var.project_name}-${var.environment}-final-snapshot"
-  deletion_protection         = var.environment == "production"
-  auto_minor_version_upgrade  = true
+  identifier                 = "${var.project_name}-${var.environment}-postgres"
+  engine                     = "postgres"
+  engine_version             = "16.2"
+  instance_class             = var.db_instance_class
+  allocated_storage          = var.db_allocated_storage
+  max_allocated_storage      = 100
+  storage_type               = "gp3"
+  storage_encrypted          = true
+  db_name                    = "nyx_${var.environment}"
+  username                   = "nyx_admin"
+  password                   = random_password.db_password.result
+  db_subnet_group_name       = aws_db_subnet_group.main.name
+  vpc_security_group_ids     = [aws_security_group.db.id]
+  multi_az                   = var.multi_az
+  backup_retention_period    = var.backup_retention_period
+  skip_final_snapshot        = var.environment == "staging"
+  final_snapshot_identifier  = "${var.project_name}-${var.environment}-final-snapshot"
+  deletion_protection        = var.environment == "production"
+  auto_minor_version_upgrade = true
 
   tags = {
     Name = "${var.project_name}-${var.environment}-rds"

@@ -2,7 +2,7 @@
 
 A payments platform I built to study what it actually takes to keep money correct: double-entry bookkeeping, atomic transfers, idempotency, a transactional outbox, and reconciliation.
 
-This is a personal project, not a product in production. It runs end to end locally, has integration tests around the financial flows, and includes Terraform for an AWS deployment that has never carried real traffic. The point was to make the hard decisions myself and understand why each one exists.
+This is a personal project, not a product in production. It runs end to end locally, has integration tests around the financial flows, and includes a partial Terraform foundation that has not been deployed. The point was to make the hard decisions myself and understand why each one exists.
 
 ---
 
@@ -50,7 +50,7 @@ The reconciliation engine sums historical debits and credits for an account and 
 - **Shared contracts:** Zod schemas used by both API and web
 - **Auth and hardening:** bcrypt, JWT, RBAC, Helmet, CORS, rate limiting
 - **Observability:** Prometheus metrics, liveness and readiness probes, correlation IDs
-- **Infrastructure:** multi-stage Docker images, Docker Compose, Terraform for AWS ECS Fargate and Aurora PostgreSQL
+- **Infrastructure:** multi-stage Docker images, Docker Compose, and a partial AWS VPC, RDS PostgreSQL, and load balancer Terraform blueprint
 - **CI:** GitHub Actions for lint, typecheck, tests, Gitleaks, and image publishing
 
 ---
@@ -171,14 +171,14 @@ The test suite is made of integration tests against a real PostgreSQL instance, 
 
 ## Operations
 
-Backups are handled by scripts in `infrastructure/scripts/`:
+Manual compressed database backups and restores are supported by scripts in `infrastructure/scripts/`. CI verifies backup, checksum, and restore behavior against a disposable PostgreSQL database:
 
 ```bash
-./infrastructure/scripts/backup-database.sh
-./infrastructure/scripts/restore-database.sh /path/to/backup.sql.gz
+DB_PASSWORD=... ./infrastructure/scripts/backup-database.sh
+DB_PASSWORD=... DB_NAME=nyx_restore ./infrastructure/scripts/restore-database.sh /path/to/backup.sql.gz
 ```
 
-Terraform in `infrastructure/terraform/` describes a VPC across two availability zones, an ECS Fargate service behind an ALB, Aurora PostgreSQL Multi-AZ, and Secrets Manager for credentials. It is written to be a realistic setup, not a battle-tested one.
+The container release workflow validates the Terraform and publishes images to GHCR. It does not deploy the application. Terraform currently describes a partial VPC, RDS PostgreSQL instance, and ALB foundation; it does not define ECS task definitions, ECS services, Secrets Manager, or a complete production network path.
 
 ---
 
@@ -188,7 +188,8 @@ Worth being explicit about, because the gaps are part of the project:
 
 - Single region, single currency, no sharding. Correctness was the goal, not throughput.
 - The outbox dispatcher is a polling worker. At real volume this becomes a queue or a CDC pipeline.
-- Terraform has never run against production traffic, so treat it as a design exercise.
+- Terraform is a partial infrastructure blueprint and has not been applied to AWS.
+- CI does not deploy staging or production workloads; published container images are artifacts only.
 - Metrics and rate limiting are basic. There is no tracing, no alerting, no dashboards.
 - No card network integration, no PCI scope, no regulatory reporting.
 - The web console is for inspection and demos, not for operators under load.
