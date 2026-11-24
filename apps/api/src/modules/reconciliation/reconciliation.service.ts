@@ -6,7 +6,7 @@ import type {
   RunReconciliationRequest,
 } from '@nyx/contracts';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
-import { AuditService } from '../audit/audit.service';
+import { AuditRequestContext, AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class ReconciliationService {
@@ -21,7 +21,10 @@ export class ReconciliationService {
    * Executes a complete reconciliation audit between account balances
    * and double-entry ledger postings.
    */
-  async runReconciliation(dto?: RunReconciliationRequest): Promise<ReconciliationReport> {
+  async runReconciliation(
+    dto?: RunReconciliationRequest,
+    auditContext: AuditRequestContext = {},
+  ): Promise<ReconciliationReport> {
     const reportId = randomUUID();
     const executedAt = new Date().toISOString();
 
@@ -88,28 +91,34 @@ export class ReconciliationService {
     };
 
     // Persist immutable reconciliation audit log
-    await this.prisma.reconciliationLog.create({
-      data: {
-        id: reportId,
-        totalAccountsAudited: accounts.length,
-        balancedAccountsCount: balancedCount,
-        discrepantAccountsCount: discrepantCount,
-        status,
-        details: JSON.stringify(details),
-        createdAt: new Date(executedAt),
-      },
-    });
+    await this.prisma.$transaction(async tx => {
+      await tx.reconciliationLog.create({
+        data: {
+          id: reportId,
+          totalAccountsAudited: accounts.length,
+          balancedAccountsCount: balancedCount,
+          discrepantAccountsCount: discrepantCount,
+          status,
+          details: JSON.stringify(details),
+          createdAt: new Date(executedAt),
+        },
+      });
 
-    await this.auditService.record({
-      action: 'RECONCILIATION_COMPLETED',
-      resourceType: 'reconciliation',
-      resourceId: reportId,
-      details: {
-        totalAccounts: accounts.length,
-        balancedCount,
-        discrepantCount,
-        status,
-      },
+      await this.auditService.record(
+        {
+          ...auditContext,
+          action: 'RECONCILIATION_COMPLETED',
+          resourceType: 'reconciliation',
+          resourceId: reportId,
+          details: {
+            totalAccounts: accounts.length,
+            balancedCount,
+            discrepantCount,
+            status,
+          },
+        },
+        tx,
+      );
     });
 
     return report;

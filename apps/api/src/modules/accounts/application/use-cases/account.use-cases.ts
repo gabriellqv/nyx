@@ -26,15 +26,13 @@ import {
 } from '../../../ledger/application/ports/ledger.repository';
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
-import { AuditService } from '../../../audit/audit.service';
+import { AuditRequestContext, AuditService } from '../../../audit/audit.service';
 import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
 import { hashRequest } from '../../../common/application/request-hash';
 
 @Injectable()
 export class CreateAccountUseCase {
   constructor(
-    @Inject(ACCOUNT_REPOSITORY)
-    private readonly accountRepository: IAccountRepository,
     @Inject(CUSTOMER_REPOSITORY)
     private readonly customerRepository: ICustomerRepository,
     private readonly doubleEntryService: DoubleEntryLedgerService,
@@ -42,7 +40,10 @@ export class CreateAccountUseCase {
     private readonly auditService: AuditService,
   ) {}
 
-  async execute(dto: CreateAccountRequest): Promise<AccountResponse> {
+  async execute(
+    dto: CreateAccountRequest,
+    auditContext: AuditRequestContext = {},
+  ): Promise<AccountResponse> {
     const customer = await this.customerRepository.findById(dto.customerId);
     if (!customer) {
       throw new NotFoundException(`Customer with id "${dto.customerId}" does not exist`);
@@ -63,21 +64,23 @@ export class CreateAccountUseCase {
       balance: initialAmount,
     });
 
-    if (initialAmount.isPositive()) {
-      await this.prisma.$transaction(async tx => {
-        await tx.account.create({
-          data: {
-            id: account.id,
-            customerId: account.customerId,
-            accountNumber: account.accountNumber,
-            currency: account.currency,
-            type: account.type,
-            status: account.status,
-            balance: account.balance.amount,
-            version: account.version,
-          },
-        });
+    await this.prisma.$transaction(async tx => {
+      await tx.account.create({
+        data: {
+          id: account.id,
+          customerId: account.customerId,
+          accountNumber: account.accountNumber,
+          currency: account.currency,
+          type: account.type,
+          status: account.status,
+          balance: account.balance.amount,
+          version: account.version,
+          createdAt: account.createdAt,
+          updatedAt: account.updatedAt,
+        },
+      });
 
+      if (initialAmount.isPositive()) {
         const openingFunds = await tx.ledgerAccount.upsert({
           where: { code_currency: { code: 'opening-funds', currency: dto.currency } },
           create: {
@@ -119,21 +122,23 @@ export class CreateAccountUseCase {
             },
           },
         });
-      });
-    } else {
-      await this.accountRepository.save(account);
-    }
+      }
 
-    await this.auditService.record({
-      action: 'ACCOUNT_CREATED',
-      resourceType: 'account',
-      resourceId: account.id,
-      details: {
-        accountNumber: account.accountNumber,
-        currency: account.currency,
-        customerId: account.customerId,
-        initialDeposit: dto.initialDeposit,
-      },
+      await this.auditService.record(
+        {
+          ...auditContext,
+          action: 'ACCOUNT_CREATED',
+          resourceType: 'account',
+          resourceId: account.id,
+          details: {
+            accountNumber: account.accountNumber,
+            currency: account.currency,
+            customerId: account.customerId,
+            initialDeposit: dto.initialDeposit,
+          },
+        },
+        tx,
+      );
     });
 
     return this.toResponse(account);
@@ -231,7 +236,11 @@ export class DepositFundsUseCase {
     private readonly auditService: AuditService,
   ) {}
 
-  async execute(accountId: string, dto: DepositRequest): Promise<AccountResponse> {
+  async execute(
+    accountId: string,
+    dto: DepositRequest,
+    auditContext: AuditRequestContext = {},
+  ): Promise<AccountResponse> {
     const account = await this.accountRepository.findById(accountId);
     if (!account) {
       throw new NotFoundException(`Account with id "${accountId}" was not found`);
@@ -266,7 +275,7 @@ export class DepositFundsUseCase {
       throw new BadRequestException(`Account is ${account.status} and cannot receive deposits`);
     }
 
-    let transactionResult: { response: AccountResponse; replayed: boolean };
+    let transactionResult: AccountResponse;
     try {
       transactionResult = await this.prisma.$transaction(async tx => {
         // Row level lock on account to prevent concurrent modifications
@@ -284,7 +293,7 @@ export class DepositFundsUseCase {
           where: { idempotencyKey: dto.idempotencyKey },
         });
         if (priorDeposit) {
-          return { response: await replayDeposit(priorDeposit), replayed: true };
+          return replayDeposit(priorDeposit);
         }
 
         if (lockedAccount.status !== 'active') {
@@ -371,7 +380,22 @@ export class DepositFundsUseCase {
           },
         });
 
-        return { response, replayed: false };
+        await this.auditService.record(
+          {
+            ...auditContext,
+            action: 'FUNDS_DEPOSITED',
+            resourceType: 'account',
+            resourceId: accountId,
+            details: {
+              amount: depositAmount.amountNumber,
+              currency: depositAmount.currency,
+              idempotencyKey: dto.idempotencyKey,
+            },
+          },
+          tx,
+        );
+
+        return response;
       });
     } catch (error) {
       if (
@@ -390,20 +414,7 @@ export class DepositFundsUseCase {
       throw error;
     }
 
-    if (!transactionResult.replayed) {
-      await this.auditService.record({
-        action: 'FUNDS_DEPOSITED',
-        resourceType: 'account',
-        resourceId: accountId,
-        details: {
-          amount: depositAmount.amountNumber,
-          currency: depositAmount.currency,
-          idempotencyKey: dto.idempotencyKey,
-        },
-      });
-    }
-
-    return transactionResult.response;
+    return transactionResult;
   }
 }
 

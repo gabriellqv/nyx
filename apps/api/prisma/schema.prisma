@@ -179,6 +179,7 @@ model AuditLog {
   resourceType String   @map("resource_type")
   resourceId   String   @map("resource_id")
   ipAddress    String?  @map("ip_address")
+  correlationId String? @map("correlation_id")
   details      String?
   createdAt    DateTime @default(now()) @map("created_at")
 

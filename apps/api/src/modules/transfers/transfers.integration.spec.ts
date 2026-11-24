@@ -3,9 +3,11 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from '../../app.module';
+import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
 import { createTestAccessToken } from '../../testing/auth-test-helper';
+import { CORRELATION_ID_HEADER } from '../../common/middleware/correlation-id.middleware';
 
 describe('Financial Domain Integration Tests', () => {
   let app: INestApplication;
@@ -38,6 +40,9 @@ describe('Financial Domain Integration Tests', () => {
 
   beforeEach(async () => {
     // Clear financial tables in correct dependency order
+    await prisma.webhookDelivery.deleteMany();
+    await prisma.outboxEvent.deleteMany();
+    await prisma.auditLog.deleteMany();
     await prisma.$executeRaw`TRUNCATE TABLE "ledger_entries", "ledger_transactions"`;
     await prisma.transferReversal.deleteMany();
     await prisma.deposit.deleteMany();
@@ -145,6 +150,7 @@ describe('Financial Domain Integration Tests', () => {
       const response = await request(app.getHttpServer())
         .post('/transfers')
         .set('Authorization', `Bearer ${adminToken}`)
+        .set(CORRELATION_ID_HEADER, 'transfer-audit-correlation-1')
         .send({
           sourceAccountId: accountAId,
           destinationAccountId: accountBId,
@@ -158,6 +164,14 @@ describe('Financial Domain Integration Tests', () => {
       expect(response.body).toHaveProperty('id');
       expect(response.body.status).toBe('posted');
       expect(response.body.amount).toBe(transferAmount);
+
+      const audit = await prisma.auditLog.findFirst({
+        where: { action: 'TRANSFER_POSTED', resourceId: response.body.id },
+      });
+      const adminClaims = app.get(JwtService).decode(adminToken) as { sub: string };
+      expect(audit?.actorId).toBe(adminClaims.sub);
+      expect(audit?.correlationId).toBe('transfer-audit-correlation-1');
+      expect(audit?.ipAddress).toBeDefined();
 
       // Verify updated account balances
       const accountA = await prisma.account.findUnique({ where: { id: accountAId } });
@@ -195,6 +209,57 @@ describe('Financial Domain Integration Tests', () => {
 
       expect(reconA.body.isReconciled).toBe(true);
       expect(reconA.body.discrepancy).toBe(0);
+    });
+
+    it('should roll back a transfer when its audit record cannot be written', async () => {
+      await prisma.$executeRawUnsafe(`
+        CREATE OR REPLACE FUNCTION fail_transfer_audit_for_test() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.action = 'TRANSFER_POSTED' THEN
+            RAISE EXCEPTION 'forced audit persistence failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TRIGGER fail_transfer_audit_for_test
+        BEFORE INSERT ON audit_logs
+        FOR EACH ROW EXECUTE FUNCTION fail_transfer_audit_for_test();
+      `);
+
+      let responseStatus: number;
+      try {
+        const response = await request(app.getHttpServer())
+          .post('/transfers')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            idempotencyKey: randomUUID(),
+            sourceAccountId: accountAId,
+            destinationAccountId: accountBId,
+            amount: 1000,
+            currency: 'USD',
+          });
+        responseStatus = response.status;
+      } finally {
+        await prisma.$executeRawUnsafe(
+          'DROP TRIGGER IF EXISTS fail_transfer_audit_for_test ON audit_logs',
+        );
+        await prisma.$executeRawUnsafe('DROP FUNCTION IF EXISTS fail_transfer_audit_for_test()');
+      }
+
+      expect(responseStatus!).toBe(500);
+      expect(await prisma.account.findUnique({ where: { id: accountAId } })).toMatchObject({
+        balance: 100000n,
+      });
+      expect(await prisma.account.findUnique({ where: { id: accountBId } })).toMatchObject({
+        balance: 20000n,
+      });
+      expect(await prisma.transfer.count()).toBe(0);
+      expect(await prisma.outboxEvent.count()).toBe(0);
+      expect(await prisma.ledgerTransaction.count({ where: { referenceType: 'transfer' } })).toBe(
+        0,
+      );
     });
   });
 

@@ -105,7 +105,7 @@ nyx/
 - Webhook secrets are encrypted at rest with AES-256-GCM. Production requires a separately managed `WEBHOOK_SECRET_ENCRYPTION_KEY`.
 - Webhook destinations are revalidated at registration and dispatch, private and reserved network addresses are rejected, DNS results are pinned for the request, and redirects are not followed.
 - Transfers check that the caller owns or is authorized over the source account.
-- Authentication, account creation, manual adjustments, and webhook changes are written to an append-only `AuditLog` with user, IP, user agent, correlation ID, and state diff.
+- Financial operation audit records include the actor, client IP, correlation ID, and operation details. They commit in the same database transaction as the financial posting. The audit table is not backed by external WORM storage.
 - Outgoing webhooks carry an `X-Nyx-Signature` HMAC-SHA256 over a timestamped body, so consumers can reject tampered or replayed requests.
 - Helmet headers, strict CORS, and global rate limiting.
 
