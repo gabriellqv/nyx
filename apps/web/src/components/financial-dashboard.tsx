@@ -27,6 +27,24 @@ import { StatusBadge } from './status-badge';
 import { useI18n } from '../lib/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const MAX_MINOR_UNITS = 9223372036854775807n;
+
+function parseMajorAmountToMinorUnits(value: string, currency: string): string | null {
+  const fractionDigits =
+    new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions()
+      .maximumFractionDigits ?? 2;
+  const decimalPattern = fractionDigits > 0 ? `(?:\\.\\d{0,${fractionDigits}})?` : '';
+  if (!new RegExp(`^\\d+${decimalPattern}$`).test(value)) {
+    return null;
+  }
+
+  const [whole, fraction = ''] = value.split('.');
+  const amount = BigInt(`${whole}${fraction.padEnd(fractionDigits, '0')}`);
+  if (amount <= 0n || amount > MAX_MINOR_UNITS) {
+    return null;
+  }
+  return amount.toString();
+}
 
 type TabView = 'overview' | 'transfers' | 'reconciliation' | 'outbox';
 
@@ -112,24 +130,24 @@ export function FinancialDashboard(): React.JSX.Element {
   const fetchData = async (): Promise<void> => {
     try {
       const [accRes, custRes, transRes] = await Promise.all([
-        apiFetch(`${API_URL}/accounts`).then(r => (r.ok ? r.json() : [])),
+        apiFetch(`${API_URL}/accounts?limit=100`).then(r => (r.ok ? r.json() : { items: [] })),
         apiFetch(`${API_URL}/customers`).then(r => (r.ok ? r.json() : [])),
-        apiFetch(`${API_URL}/transfers`).then(r => (r.ok ? r.json() : [])),
+        apiFetch(`${API_URL}/transfers?limit=100`).then(r => (r.ok ? r.json() : { items: [] })),
       ]);
 
-      setAccounts(accRes);
+      setAccounts(accRes.items);
       setCustomers(custRes);
-      setTransfers(transRes);
+      setTransfers(transRes.items);
 
-      if (accRes.length >= 2) {
-        if (!sourceAccountId) setSourceAccountId(accRes[0].id);
-        if (!destAccountId) setDestAccountId(accRes[1].id);
+      if (accRes.items.length >= 2) {
+        if (!sourceAccountId) setSourceAccountId(accRes.items[0].id);
+        if (!destAccountId) setDestAccountId(accRes.items[1].id);
       }
-      if (accRes.length >= 1 && !depositAccountId) {
-        setDepositAccountId(accRes[0].id);
+      if (accRes.items.length >= 1 && !depositAccountId) {
+        setDepositAccountId(accRes.items[0].id);
       }
-      if (accRes.length >= 1 && !auditAccountId) {
-        setAuditAccountId(accRes[0].id);
+      if (accRes.items.length >= 1 && !auditAccountId) {
+        setAuditAccountId(accRes.items[0].id);
       }
     } catch {
       // Graceful offline fallback
@@ -229,7 +247,9 @@ export function FinancialDashboard(): React.JSX.Element {
     );
   }
 
-  const totalCustodyBalance = accounts.reduce((acc, curr) => acc + (curr.balance ?? 0), 0);
+  const totalCustodyBalance = accounts
+    .reduce((acc, curr) => acc + BigInt(curr.balance), 0n)
+    .toString();
   const isAdmin = currentUser?.role === 'admin';
 
   const handleSeedInitialData = async (): Promise<void> => {
@@ -258,7 +278,7 @@ export function FinancialDashboard(): React.JSX.Element {
           customerId: customer.id,
           currency: 'USD',
           type: 'checking',
-          initialDeposit: 100000,
+          initialDeposit: '100000',
         }),
       });
       if (!acc1Res.ok) throw new Error('Primary account provisioning rejected');
@@ -272,7 +292,7 @@ export function FinancialDashboard(): React.JSX.Element {
           customerId: customer.id,
           currency: 'USD',
           type: 'savings',
-          initialDeposit: 50000,
+          initialDeposit: '50000',
         }),
       });
       if (!acc2Res.ok) throw new Error('Clearing account provisioning rejected');
@@ -285,7 +305,7 @@ export function FinancialDashboard(): React.JSX.Element {
         body: JSON.stringify({
           sourceAccountId: acc1.id,
           destinationAccountId: acc2.id,
-          amount: 15000,
+          amount: '15000',
           currency: 'USD',
           description: 'Automated treasury rebalance',
           idempotencyKey: `seed-transfer-${Date.now()}`,
@@ -320,8 +340,9 @@ export function FinancialDashboard(): React.JSX.Element {
       return;
     }
 
-    const cents = Math.round(parseFloat(transferAmount) * 100);
-    if (isNaN(cents) || cents <= 0) return;
+    const currency = accounts.find(account => account.id === sourceAccountId)?.currency ?? 'USD';
+    const amountMinor = parseMajorAmountToMinorUnits(transferAmount, currency);
+    if (!amountMinor) return;
 
     setSubmitting(true);
     setActionNotice(null);
@@ -335,8 +356,8 @@ export function FinancialDashboard(): React.JSX.Element {
         body: JSON.stringify({
           sourceAccountId,
           destinationAccountId: destAccountId,
-          amount: cents,
-          currency: 'USD',
+          amount: amountMinor,
+          currency,
           description: transferDescription,
           idempotencyKey,
         }),
@@ -355,7 +376,7 @@ export function FinancialDashboard(): React.JSX.Element {
         message: t.notices.transferSuccess(
           srcAcc?.accountNumber ?? sourceAccountId.slice(0, 8),
           dstAcc?.accountNumber ?? destAccountId.slice(0, 8),
-          formatMoney(cents),
+          formatMoney(amountMinor, currency),
         ),
       });
     } catch (err) {
@@ -372,8 +393,9 @@ export function FinancialDashboard(): React.JSX.Element {
     e.preventDefault();
     if (!depositAccountId) return;
 
-    const cents = Math.round(parseFloat(depositAmount) * 100);
-    if (isNaN(cents) || cents <= 0) return;
+    const currency = accounts.find(account => account.id === depositAccountId)?.currency ?? 'USD';
+    const amountMinor = parseMajorAmountToMinorUnits(depositAmount, currency);
+    if (!amountMinor) return;
 
     setSubmitting(true);
     setActionNotice(null);
@@ -385,7 +407,7 @@ export function FinancialDashboard(): React.JSX.Element {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount: cents,
+          amount: amountMinor,
           idempotencyKey,
           description: 'Institutional treasury deposit',
         }),
@@ -402,7 +424,7 @@ export function FinancialDashboard(): React.JSX.Element {
         type: 'ok',
         message: t.notices.depositSuccess(
           targetAcc?.accountNumber ?? depositAccountId.slice(0, 8),
-          formatMoney(cents),
+          formatMoney(amountMinor, currency),
         ),
       });
     } catch (err) {
@@ -443,7 +465,8 @@ export function FinancialDashboard(): React.JSX.Element {
   const targetReconciledAccount = reconciliationResult
     ? accounts.find(a => a.id === reconciliationResult.accountId)
     : null;
-  const transferCents = Math.round((parseFloat(transferAmount) || 0) * 100);
+  const transferCurrency = activeSourceAccount?.currency ?? 'USD';
+  const transferMinorUnits = parseMajorAmountToMinorUnits(transferAmount, transferCurrency) ?? '0';
 
   return (
     <div className="min-h-dvh bg-nyx-background text-nyx-text flex flex-col lg:flex-row">
@@ -977,7 +1000,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-semibold text-[#f87171] tabular-nums">
-                      - {formatMoney(transferCents)}
+                      - {formatMoney(transferMinorUnits, transferCurrency)}
                     </div>
                     <div className="text-[11px] text-nyx-muted">
                       {t.transfers.postedImmediately}
@@ -1000,7 +1023,7 @@ export function FinancialDashboard(): React.JSX.Element {
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-semibold text-[#4ade80] tabular-nums">
-                      + {formatMoney(transferCents)}
+                      + {formatMoney(transferMinorUnits, transferCurrency)}
                     </div>
                     <div className="text-[11px] text-nyx-muted">
                       {t.transfers.postedImmediately}
@@ -1133,7 +1156,9 @@ export function FinancialDashboard(): React.JSX.Element {
                     <div className="text-nyx-muted">{t.reconciliation.discrepancy}</div>
                     <div
                       className={`text-lg font-semibold mt-1 tabular-nums ${
-                        reconciliationResult.discrepancy === 0 ? 'text-[#4ade80]' : 'text-[#f87171]'
+                        reconciliationResult.discrepancy === '0'
+                          ? 'text-[#4ade80]'
+                          : 'text-[#f87171]'
                       }`}
                     >
                       {formatMoney(

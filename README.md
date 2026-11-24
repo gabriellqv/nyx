@@ -31,6 +31,10 @@ Transfers run inside a single database transaction and lock the affected account
 
 `/transfers`, `/accounts/:id/deposit`, `/payments`, and transfer reversals require an `idempotencyKey`. The operation and a SHA-256 fingerprint of its canonical request are committed with the financial posting. Retries return the original result, while reuse of a key with different parameters is rejected. A transfer can have at most one reversal.
 
+### Financial API values and pagination
+
+Monetary JSON values are decimal strings in currency minor units. Requests accept exact strings and safe integer numbers; responses never convert ledger amounts to JavaScript floating-point numbers. Account, transfer, and payment list routes return `{ items, nextCursor, hasMore }` and accept `limit` and `cursor` query parameters.
+
 ### Transactional outbox
 
 Events are written to an `Outbox` table in the same transaction that commits the ledger change. Dispatchers claim rows with leases and PostgreSQL `SKIP LOCKED`, sign payloads with HMAC-SHA256, and retry failed endpoints without resending successful deliveries. Delivery is at-least-once: the delivery ID stays stable across retries, and consumers should deduplicate by that ID.

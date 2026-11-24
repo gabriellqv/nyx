@@ -17,9 +17,11 @@ import {
   type CreateAccountRequest,
   type DepositRequest,
   type AccountResponse,
+  type AccountPageResponse,
   type LedgerReconciliationResponse,
   type UserProfile,
 } from '@nyx/contracts';
+import { cursorPaginationSchema } from '@nyx/contracts';
 import {
   CreateAccountUseCase,
   GetAccountUseCase,
@@ -64,8 +66,14 @@ export class AccountsController {
   async list(
     @CurrentUser() user: UserProfile,
     @Query('customerId') customerId?: string,
-  ): Promise<AccountResponse[]> {
-    return this.listAccountsUseCase.execute(user, customerId);
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ): Promise<AccountPageResponse> {
+    const pagination = cursorPaginationSchema.safeParse({ limit, cursor });
+    if (!pagination.success) {
+      throw new BadRequestException(pagination.error.format());
+    }
+    return this.listAccountsUseCase.execute(user, customerId, pagination.data);
   }
 
   @Get(':id')

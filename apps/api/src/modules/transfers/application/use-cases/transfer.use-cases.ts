@@ -11,6 +11,7 @@ import type {
   CreateTransferRequest,
   ReverseTransferRequest,
   TransferResponse,
+  TransferPageResponse,
   UserProfile,
 } from '@nyx/contracts';
 import { Money } from '../../../common/domain/value-objects/money.vo';
@@ -21,6 +22,7 @@ import { PrismaService } from '../../../../infrastructure/database/prisma.servic
 import { AuditRequestContext, AuditService } from '../../../audit/audit.service';
 import { OutboxService } from '../../../outbox/outbox.service';
 import { hashRequest, isUniqueConstraintError } from '../../../common/application/request-hash';
+import type { CursorPagination } from '../../../common/application/cursor-pagination';
 
 interface LockedAccountRow {
   id: string;
@@ -100,7 +102,7 @@ export class ExecuteTransferUseCase {
       );
     }
 
-    const transferAmount = Money.fromCents(dto.amount, dto.currency);
+    const transferAmount = Money.fromMinorUnits(dto.amount, dto.currency);
     const transferId = randomUUID();
 
     // 2. Atomic Database Transaction with Deterministic Ordered Locking
@@ -156,7 +158,7 @@ export class ExecuteTransferUseCase {
             requestHash: duplicate.requestHash,
             sourceAccountId: duplicate.sourceAccountId,
             destinationAccountId: duplicate.destinationAccountId,
-            amount: Money.fromCents(duplicate.amount, duplicate.currency),
+            amount: Money.fromMinorUnits(duplicate.amount, duplicate.currency),
             status: duplicate.status as TransferStatus,
             description: duplicate.description,
             failureReason: duplicate.failureReason,
@@ -198,13 +200,15 @@ export class ExecuteTransferUseCase {
         // Validate sufficient funds
         if (sourceRow.balance < transferAmount.amount) {
           throw new BadRequestException(
-            `Source account has insufficient funds. Available: ${Number(sourceRow.balance)}, Requested: ${transferAmount.amountNumber}`,
+            `Source account has insufficient funds. Available: ${sourceRow.balance}, Requested: ${transferAmount.amount}`,
           );
         }
 
         // Update balances
         const newSourceBalance = sourceRow.balance - transferAmount.amount;
-        const newDestBalance = destRow.balance + transferAmount.amount;
+        const newDestBalance = Money.fromMinorUnits(destRow.balance, destRow.currency).add(
+          transferAmount,
+        ).amount;
 
         await tx.account.update({
           where: { id: sourceRow.id },
@@ -281,7 +285,7 @@ export class ExecuteTransferUseCase {
               transferId: record.id,
               sourceAccountId: record.sourceAccountId,
               destinationAccountId: record.destinationAccountId,
-              amount: transferAmount.amountNumber,
+              amount: transferAmount.amount.toString(),
               currency: transferAmount.currency,
               idempotencyKey: record.idempotencyKey,
             },
@@ -299,7 +303,7 @@ export class ExecuteTransferUseCase {
             details: {
               sourceAccountId: record.sourceAccountId,
               destinationAccountId: record.destinationAccountId,
-              amount: transferAmount.amountNumber,
+              amount: transferAmount.amount.toString(),
               currency: transferAmount.currency,
               idempotencyKey: record.idempotencyKey,
             },
@@ -313,7 +317,7 @@ export class ExecuteTransferUseCase {
           requestHash: record.requestHash,
           sourceAccountId: record.sourceAccountId,
           destinationAccountId: record.destinationAccountId,
-          amount: Money.fromCents(record.amount, record.currency),
+          amount: Money.fromMinorUnits(record.amount, record.currency),
           status: 'posted',
           description: record.description,
           completedAt: record.completedAt,
@@ -344,7 +348,7 @@ export class ExecuteTransferUseCase {
       id: transfer.id,
       sourceAccountId: transfer.sourceAccountId,
       destinationAccountId: transfer.destinationAccountId,
-      amount: transfer.amount.amountNumber,
+      amount: transfer.amount.amount.toString(),
       currency: transfer.amount.currency,
       status: transfer.status,
       idempotencyKey: transfer.idempotencyKey,
@@ -391,7 +395,7 @@ export class GetTransferUseCase {
       id: transfer.id,
       sourceAccountId: transfer.sourceAccountId,
       destinationAccountId: transfer.destinationAccountId,
-      amount: transfer.amount.amountNumber,
+      amount: transfer.amount.amount.toString(),
       currency: transfer.amount.currency,
       status: transfer.status,
       idempotencyKey: transfer.idempotencyKey,
@@ -412,32 +416,37 @@ export class ListTransfersUseCase {
 
   async execute(
     currentUser: UserProfile,
+    pagination: CursorPagination,
     filters?: {
       accountId?: string | undefined;
       status?: string | undefined;
     },
-  ): Promise<TransferResponse[]> {
+  ): Promise<TransferPageResponse> {
     if (currentUser.role === 'user' && !currentUser.customerId) {
-      return [];
+      return { items: [], nextCursor: null, hasMore: false };
     }
 
-    const transfers = await this.transferRepository.findAll({
+    const page = await this.transferRepository.findAll({
       ...filters,
       customerId: currentUser.role === 'user' ? (currentUser.customerId ?? undefined) : undefined,
+      pagination,
     });
-    return transfers.map(t => ({
-      id: t.id,
-      sourceAccountId: t.sourceAccountId,
-      destinationAccountId: t.destinationAccountId,
-      amount: t.amount.amountNumber,
-      currency: t.amount.currency,
-      status: t.status,
-      idempotencyKey: t.idempotencyKey,
-      description: t.description,
-      failureReason: t.failureReason,
-      createdAt: t.createdAt.toISOString(),
-      completedAt: t.completedAt ? t.completedAt.toISOString() : null,
-    }));
+    return {
+      ...page,
+      items: page.items.map(t => ({
+        id: t.id,
+        sourceAccountId: t.sourceAccountId,
+        destinationAccountId: t.destinationAccountId,
+        amount: t.amount.amount.toString(),
+        currency: t.amount.currency,
+        status: t.status,
+        idempotencyKey: t.idempotencyKey,
+        description: t.description,
+        failureReason: t.failureReason,
+        createdAt: t.createdAt.toISOString(),
+        completedAt: t.completedAt ? t.completedAt.toISOString() : null,
+      })),
+    };
   }
 }
 
@@ -457,7 +466,7 @@ export class ReverseTransferUseCase {
       id: transfer.id,
       sourceAccountId: transfer.sourceAccountId,
       destinationAccountId: transfer.destinationAccountId,
-      amount: transfer.amount.amountNumber,
+      amount: transfer.amount.amount.toString(),
       currency: transfer.amount.currency,
       status: transfer.status,
       idempotencyKey: transfer.idempotencyKey,
@@ -585,7 +594,7 @@ export class ReverseTransferUseCase {
         }
 
         // In a reversal, destinationAccount (which received funds) must return them
-        const transferAmount = Money.fromCents(transfer.amount, transfer.currency);
+        const transferAmount = Money.fromMinorUnits(transfer.amount, transfer.currency);
         if (destAccount.balance < transferAmount.amount) {
           throw new BadRequestException(
             `Destination account ${destAccount.account_number} does not have sufficient funds to reverse this transfer`,
@@ -605,7 +614,9 @@ export class ReverseTransferUseCase {
         await tx.account.update({
           where: { id: sourceAccount.id },
           data: {
-            balance: sourceAccount.balance + transferAmount.amount,
+            balance: Money.fromMinorUnits(sourceAccount.balance, sourceAccount.currency).add(
+              transferAmount,
+            ).amount,
             version: sourceAccount.version + 1,
             updatedAt: new Date(),
           },
@@ -669,7 +680,7 @@ export class ReverseTransferUseCase {
             payload: {
               transferId: transfer.id,
               reason: dto.reason,
-              amount: transferAmount.amountNumber,
+              amount: transferAmount.amount.toString(),
               currency: transfer.currency,
             },
           },
@@ -684,7 +695,7 @@ export class ReverseTransferUseCase {
             resourceId: transferId,
             details: {
               reason: dto.reason,
-              amount: transferAmount.amountNumber,
+              amount: transferAmount.amount.toString(),
             },
           },
           tx,

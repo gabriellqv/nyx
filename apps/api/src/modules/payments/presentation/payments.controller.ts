@@ -15,8 +15,10 @@ import {
   createPaymentSchema,
   type CreatePaymentRequest,
   type PaymentResponse,
+  type PaymentPageResponse,
   type UserProfile,
 } from '@nyx/contracts';
+import { cursorPaginationSchema } from '@nyx/contracts';
 import {
   ProcessPaymentUseCase,
   GetPaymentUseCase,
@@ -65,10 +67,16 @@ export class PaymentsController {
   async list(
     @Query('accountId') accountId: string,
     @CurrentUser() user: UserProfile,
-  ): Promise<PaymentResponse[]> {
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ): Promise<PaymentPageResponse> {
     if (!accountId) {
       throw new BadRequestException('accountId query parameter is required');
     }
-    return this.listPaymentsUseCase.execute(accountId, user);
+    const pagination = cursorPaginationSchema.safeParse({ limit, cursor });
+    if (!pagination.success) {
+      throw new BadRequestException(pagination.error.format());
+    }
+    return this.listPaymentsUseCase.execute(accountId, user, pagination.data);
   }
 }

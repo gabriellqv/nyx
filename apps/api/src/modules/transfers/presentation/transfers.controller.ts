@@ -17,8 +17,10 @@ import {
   type CreateTransferRequest,
   type ReverseTransferRequest,
   type TransferResponse,
+  type TransferPageResponse,
   type UserProfile,
 } from '@nyx/contracts';
+import { cursorPaginationSchema } from '@nyx/contracts';
 import {
   ExecuteTransferUseCase,
   GetTransferUseCase,
@@ -63,8 +65,14 @@ export class TransfersController {
     @CurrentUser() user: UserProfile,
     @Query('accountId') accountId?: string,
     @Query('status') status?: string,
-  ): Promise<TransferResponse[]> {
-    return this.listTransfersUseCase.execute(user, { accountId, status });
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ): Promise<TransferPageResponse> {
+    const pagination = cursorPaginationSchema.safeParse({ limit, cursor });
+    if (!pagination.success) {
+      throw new BadRequestException(pagination.error.format());
+    }
+    return this.listTransfersUseCase.execute(user, pagination.data, { accountId, status });
   }
 
   @Get(':id')

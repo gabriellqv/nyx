@@ -3,6 +3,8 @@ import { PrismaService } from '../../../../infrastructure/database/prisma.servic
 import { Payment } from '../../domain/entities/payment.entity';
 import { IPaymentRepository } from '../../application/ports/payment.repository';
 import { Money } from '../../../common/domain/value-objects/money.vo';
+import type { CursorPagination } from '../../../common/application/cursor-pagination';
+import { makeCursorPage } from '../../../common/application/cursor-pagination';
 import type { PaymentMethod, PaymentStatus } from '@nyx/contracts';
 
 @Injectable()
@@ -19,12 +21,17 @@ export class PrismaPaymentRepository implements IPaymentRepository {
     return raw ? this.toDomain(raw) : null;
   }
 
-  async findByAccountId(accountId: string): Promise<Payment[]> {
+  async findByAccountId(accountId: string, pagination: CursorPagination) {
     const raw = await this.prisma.payment.findMany({
       where: { destinationAccountId: accountId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: pagination.limit + 1,
+      ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
     });
-    return raw.map(r => this.toDomain(r));
+    return makeCursorPage(
+      raw.map(r => this.toDomain(r)),
+      pagination.limit,
+    );
   }
 
   async save(payment: Payment): Promise<Payment> {
@@ -70,7 +77,7 @@ export class PrismaPaymentRepository implements IPaymentRepository {
       idempotencyKey: raw.idempotencyKey,
       requestHash: raw.requestHash,
       destinationAccountId: raw.destinationAccountId,
-      amount: Money.fromCents(raw.amount, raw.currency),
+      amount: Money.fromMinorUnits(raw.amount, raw.currency),
       method: raw.method as PaymentMethod,
       status: raw.status as PaymentStatus,
       description: raw.description,

@@ -76,7 +76,7 @@ describe('Payments Module Integration Tests', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: accountId,
-          amount: 5000,
+          amount: '5000',
           currency: 'USD',
           method: 'pix',
           idempotencyKey,
@@ -86,7 +86,7 @@ describe('Payments Module Integration Tests', () => {
 
       expect(res.body).toMatchObject({
         destinationAccountId: accountId,
-        amount: 5000,
+        amount: '5000',
         currency: 'USD',
         method: 'pix',
         status: 'completed',
@@ -121,7 +121,7 @@ describe('Payments Module Integration Tests', () => {
       expect(outboxEvent?.eventType).toBe('payment.completed');
       expect(outboxEvent?.status).toBe('pending');
       const payload = JSON.parse(outboxEvent?.payload ?? '{}');
-      expect(payload.amount).toBe(5000);
+      expect(payload.amount).toBe('5000');
       expect(payload.method).toBe('pix');
 
       // Verify audit log recorded
@@ -243,6 +243,26 @@ describe('Payments Module Integration Tests', () => {
         .expect(409);
     });
 
+    it('should preserve large payment amounts in the response', async () => {
+      const exactAmount = 9007199254740993n;
+      const response = await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          destinationAccountId: accountId,
+          amount: exactAmount.toString(),
+          currency: 'USD',
+          method: 'pix',
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+
+      expect(response.body.amount).toBe(exactAmount.toString());
+      expect(await prisma.payment.findUnique({ where: { id: response.body.id } })).toMatchObject({
+        amount: exactAmount,
+      });
+    });
+
     it('should return the same payment for concurrent retries with one idempotency key', async () => {
       const payload = {
         destinationAccountId: accountId,
@@ -265,6 +285,36 @@ describe('Payments Module Integration Tests', () => {
       expect(responses[0]?.body.id).toBe(responses[1]?.body.id);
       const account = await prisma.account.findUnique({ where: { id: accountId } });
       expect(account?.balance).toBe(12000n);
+    });
+
+    it('should page through payments for an account without duplicates', async () => {
+      for (let index = 0; index < 3; index++) {
+        await request(app.getHttpServer())
+          .post('/payments')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            destinationAccountId: accountId,
+            amount: '100',
+            currency: 'USD',
+            method: 'pix',
+            idempotencyKey: randomUUID(),
+          })
+          .expect(201);
+      }
+
+      const firstPage = await request(app.getHttpServer())
+        .get(`/payments?accountId=${accountId}&limit=2`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(firstPage.body.items).toHaveLength(2);
+      expect(firstPage.body.hasMore).toBe(true);
+
+      const secondPage = await request(app.getHttpServer())
+        .get(`/payments?accountId=${accountId}&limit=2&cursor=${firstPage.body.nextCursor}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(secondPage.body.items).toHaveLength(1);
+      expect(secondPage.body.hasMore).toBe(false);
     });
   });
 

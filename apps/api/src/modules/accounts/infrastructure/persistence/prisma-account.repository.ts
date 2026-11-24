@@ -3,6 +3,8 @@ import { PrismaService } from '../../../../infrastructure/database/prisma.servic
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Account, AccountType, AccountStatus } from '../../domain/entities/account.entity';
 import { IAccountRepository } from '../../application/ports/account.repository';
+import type { CursorPagination } from '../../../common/application/cursor-pagination';
+import { makeCursorPage } from '../../../common/application/cursor-pagination';
 
 @Injectable()
 export class PrismaAccountRepository implements IAccountRepository {
@@ -18,19 +20,29 @@ export class PrismaAccountRepository implements IAccountRepository {
     return record ? this.toDomain(record) : null;
   }
 
-  async findByCustomerId(customerId: string): Promise<Account[]> {
+  async findByCustomerId(customerId: string, pagination: CursorPagination) {
     const records = await this.prisma.account.findMany({
       where: { customerId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: pagination.limit + 1,
+      ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
     });
-    return records.map(r => this.toDomain(r));
+    return makeCursorPage(
+      records.map(r => this.toDomain(r)),
+      pagination.limit,
+    );
   }
 
-  async findAll(): Promise<Account[]> {
+  async findAll(pagination: CursorPagination) {
     const records = await this.prisma.account.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: pagination.limit + 1,
+      ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
     });
-    return records.map(r => this.toDomain(r));
+    return makeCursorPage(
+      records.map(r => this.toDomain(r)),
+      pagination.limit,
+    );
   }
 
   async save(account: Account): Promise<Account> {
@@ -95,7 +107,7 @@ export class PrismaAccountRepository implements IAccountRepository {
       currency: record.currency,
       type: record.type as AccountType,
       status: record.status as AccountStatus,
-      balance: Money.fromCents(record.balance, record.currency),
+      balance: Money.fromMinorUnits(record.balance, record.currency),
       version: record.version,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
