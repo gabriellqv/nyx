@@ -18,7 +18,6 @@ import {
   AlertIcon,
   MenuIcon,
   CloseIcon,
-  DatabaseIcon,
 } from './icons';
 import { NyxLogo } from './nyx-logo';
 import { StatusBadge } from './status-badge';
@@ -435,22 +434,6 @@ export function FinancialDashboard(): React.JSX.Element {
             </button>
           </nav>
         </div>
-
-        {/* Engine Diagnostics Footer */}
-        <div className="p-4 border-t border-nyx-border bg-nyx-background/50 flex flex-col gap-2 text-xs">
-          <div className="flex items-center justify-between text-nyx-muted">
-            <span className="flex items-center gap-1.5">
-              <DatabaseIcon size={13} />
-              <span>PostgreSQL 16</span>
-            </span>
-            <span className="text-[#4ade80] font-medium">ACID Active</span>
-          </div>
-          <div className="flex items-center justify-between text-nyx-muted">
-            <span>Ledger Invariant</span>
-            <span className="text-nyx-highlight font-medium">Exact Balance</span>
-          </div>
-          <div className="text-nyx-muted text-[11px] pt-1">Node Runtime 22 LTS</div>
-        </div>
       </aside>
 
       {/* Main Workspace Canvas */}
@@ -743,7 +726,7 @@ export function FinancialDashboard(): React.JSX.Element {
               <div>
                 <h2 className="text-base font-semibold text-nyx-text">Transfer Terminal</h2>
                 <p className="text-xs text-nyx-muted mt-0.5">
-                  Execute real-time funds routing with isolated ACID transactions
+                  Execute real-time funds routing with atomic double-entry verification
                 </p>
               </div>
 
@@ -1034,9 +1017,8 @@ export function FinancialDashboard(): React.JSX.Element {
                 Transactional Outbox Event Stream
               </h2>
               <p className="text-xs text-nyx-muted mt-1 leading-relaxed">
-                The Outbox Pattern ensures events are saved in the same PostgreSQL transaction as
-                ledger mutations. Events are asynchronously dispatched to subscribed endpoints with
-                HMAC-SHA256 signatures for zero message loss.
+                Guarantees event notifications are committed atomically alongside ledger movements
+                and dispatched to subscribed endpoints with cryptographic verification.
               </p>
             </div>
 
