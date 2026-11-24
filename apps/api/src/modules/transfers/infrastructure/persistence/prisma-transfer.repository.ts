@@ -21,6 +21,7 @@ export class PrismaTransferRepository implements ITransferRepository {
   async findAll(filters?: {
     accountId?: string | undefined;
     status?: string | undefined;
+    customerId?: string | undefined;
   }): Promise<Transfer[]> {
     const where: Record<string, unknown> = {};
 
@@ -33,6 +34,22 @@ export class PrismaTransferRepository implements ITransferRepository {
 
     if (filters?.status) {
       where.status = filters.status;
+    }
+
+    if (filters?.customerId) {
+      const ownershipFilter = {
+        OR: [
+          { sourceAccount: { customerId: filters.customerId } },
+          { destinationAccount: { customerId: filters.customerId } },
+        ],
+      };
+
+      if (where.OR) {
+        where.AND = [{ OR: where.OR }, ownershipFilter];
+        delete where.OR;
+      } else {
+        Object.assign(where, ownershipFilter);
+      }
     }
 
     const records = await this.prisma.transfer.findMany({

@@ -13,12 +13,14 @@ import {
   createPaymentSchema,
   type CreatePaymentRequest,
   type PaymentResponse,
+  type UserProfile,
 } from '@nyx/contracts';
 import {
   ProcessPaymentUseCase,
   GetPaymentUseCase,
   ListPaymentsUseCase,
 } from '../application/use-cases/payment.use-cases';
+import { CurrentUser, Roles } from '../../auth/infrastructure/decorators/auth.decorators';
 
 @Controller('payments')
 export class PaymentsController {
@@ -29,6 +31,7 @@ export class PaymentsController {
   ) {}
 
   @Post()
+  @Roles('admin')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() body: unknown): Promise<PaymentResponse> {
     const parseResult = createPaymentSchema.safeParse(body);
@@ -39,15 +42,21 @@ export class PaymentsController {
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string): Promise<PaymentResponse> {
-    return this.getPaymentUseCase.execute(id);
+  async getById(
+    @Param('id') id: string,
+    @CurrentUser() user: UserProfile,
+  ): Promise<PaymentResponse> {
+    return this.getPaymentUseCase.execute(id, user);
   }
 
   @Get()
-  async list(@Query('accountId') accountId: string): Promise<PaymentResponse[]> {
+  async list(
+    @Query('accountId') accountId: string,
+    @CurrentUser() user: UserProfile,
+  ): Promise<PaymentResponse[]> {
     if (!accountId) {
       throw new BadRequestException('accountId query parameter is required');
     }
-    return this.listPaymentsUseCase.execute(accountId);
+    return this.listPaymentsUseCase.execute(accountId, user);
   }
 }

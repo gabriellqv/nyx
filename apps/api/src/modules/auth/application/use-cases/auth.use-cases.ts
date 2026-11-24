@@ -28,8 +28,8 @@ export class RegisterUserUseCase {
       name: dto.name,
       email: dto.email,
       passwordHash,
-      role: dto.role,
-      customerId: dto.customerId,
+      role: 'user',
+      customerId: null,
     });
 
     const saved = await this.userRepository.save(user);

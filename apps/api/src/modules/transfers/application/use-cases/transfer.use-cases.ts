@@ -42,12 +42,25 @@ export class ExecuteTransferUseCase {
     private readonly outboxService: OutboxService,
   ) {}
 
-  async execute(
-    dto: CreateTransferRequest,
-    currentUser?: UserProfile | undefined,
-  ): Promise<TransferResponse> {
+  async execute(dto: CreateTransferRequest, currentUser: UserProfile): Promise<TransferResponse> {
     if (dto.sourceAccountId === dto.destinationAccountId) {
       throw new BadRequestException('Source and destination accounts must be distinct');
+    }
+
+    const sourceAccount = await this.prisma.account.findUnique({
+      where: { id: dto.sourceAccountId },
+      select: { customerId: true },
+    });
+    if (!sourceAccount) {
+      throw new NotFoundException(`Source account "${dto.sourceAccountId}" does not exist`);
+    }
+    if (
+      currentUser.role !== 'admin' &&
+      (!currentUser.customerId || sourceAccount.customerId !== currentUser.customerId)
+    ) {
+      throw new ForbiddenException(
+        'Forbidden: authenticated user is not authorized to debit this source account',
+      );
     }
 
     // 1. Idempotency Check
@@ -104,10 +117,8 @@ export class ExecuteTransferUseCase {
 
       // Enforce account ownership access boundary
       if (
-        currentUser &&
         currentUser.role !== 'admin' &&
-        currentUser.customerId &&
-        sourceRow.customer_id !== currentUser.customerId
+        (!currentUser.customerId || sourceRow.customer_id !== currentUser.customerId)
       ) {
         throw new ForbiddenException(
           'Forbidden: authenticated user is not authorized to debit this source account',
@@ -280,12 +291,30 @@ export class GetTransferUseCase {
   constructor(
     @Inject(TRANSFER_REPOSITORY)
     private readonly transferRepository: ITransferRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
-  async execute(id: string): Promise<TransferResponse> {
+  async execute(id: string, currentUser: UserProfile): Promise<TransferResponse> {
     const transfer = await this.transferRepository.findById(id);
     if (!transfer) {
       throw new NotFoundException(`Transfer with id "${id}" was not found`);
+    }
+
+    if (currentUser.role === 'user') {
+      if (!currentUser.customerId) {
+        throw new ForbiddenException('User is not authorized to access this transfer');
+      }
+
+      const ownedAccounts = await this.prisma.account.count({
+        where: {
+          id: { in: [transfer.sourceAccountId, transfer.destinationAccountId] },
+          customerId: currentUser.customerId,
+        },
+      });
+
+      if (ownedAccounts === 0) {
+        throw new ForbiddenException('User is not authorized to access this transfer');
+      }
     }
 
     return {
@@ -311,11 +340,21 @@ export class ListTransfersUseCase {
     private readonly transferRepository: ITransferRepository,
   ) {}
 
-  async execute(filters?: {
-    accountId?: string | undefined;
-    status?: string | undefined;
-  }): Promise<TransferResponse[]> {
-    const transfers = await this.transferRepository.findAll(filters);
+  async execute(
+    currentUser: UserProfile,
+    filters?: {
+      accountId?: string | undefined;
+      status?: string | undefined;
+    },
+  ): Promise<TransferResponse[]> {
+    if (currentUser.role === 'user' && !currentUser.customerId) {
+      return [];
+    }
+
+    const transfers = await this.transferRepository.findAll({
+      ...filters,
+      customerId: currentUser.role === 'user' ? (currentUser.customerId ?? undefined) : undefined,
+    });
     return transfers.map(t => ({
       id: t.id,
       sourceAccountId: t.sourceAccountId,

@@ -8,6 +8,7 @@ export interface ITransferRepository {
   findAll(filters?: {
     accountId?: string | undefined;
     status?: string | undefined;
+    customerId?: string | undefined;
   }): Promise<Transfer[]>;
   save(transfer: Transfer): Promise<Transfer>;
 }

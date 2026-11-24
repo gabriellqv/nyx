@@ -7,6 +7,16 @@ export const ptBR: TranslationDictionary = {
     tagline: 'Plataforma Bancária e Contas',
     coreBanking: 'Internet Banking Institucional',
   },
+  auth: {
+    title: 'Acesso de operador',
+    subtitle: 'Entre com uma conta autorizada do NYX.',
+    email: 'E-mail',
+    password: 'Senha',
+    signIn: 'Entrar',
+    signingIn: 'Entrando...',
+    invalidCredentials: 'E-mail ou senha inválidos',
+    signOut: 'Sair',
+  },
   nav: {
     overview: 'Contas e Saldos',
     transfers: 'Transferências',

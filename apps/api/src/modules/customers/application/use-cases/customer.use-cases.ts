@@ -1,8 +1,9 @@
 import { Inject, Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { CreateCustomerRequest, CustomerResponse } from '@nyx/contracts';
+import type { CreateCustomerRequest, CustomerResponse, UserProfile } from '@nyx/contracts';
 import { Customer } from '../../domain/entities/customer.entity';
 import { CUSTOMER_REPOSITORY, ICustomerRepository } from '../ports/customer.repository';
+import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
 
 @Injectable()
 export class CreateCustomerUseCase {
@@ -54,11 +55,13 @@ export class GetCustomerUseCase {
     private readonly customerRepository: ICustomerRepository,
   ) {}
 
-  async execute(id: string): Promise<CustomerResponse> {
+  async execute(id: string, currentUser: UserProfile): Promise<CustomerResponse> {
     const customer = await this.customerRepository.findById(id);
     if (!customer) {
       throw new NotFoundException(`Customer with id "${id}" was not found`);
     }
+
+    assertCanReadCustomer(currentUser, customer.id);
 
     return {
       id: customer.id,

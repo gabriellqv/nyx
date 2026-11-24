@@ -5,6 +5,7 @@ import type {
   AccountResponse,
   DepositRequest,
   LedgerReconciliationResponse,
+  UserProfile,
 } from '@nyx/contracts';
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Account } from '../../domain/entities/account.entity';
@@ -20,6 +21,7 @@ import {
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { AuditService } from '../../../audit/audit.service';
+import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
 
 @Injectable()
 export class CreateAccountUseCase {
@@ -154,11 +156,13 @@ export class GetAccountUseCase {
     private readonly accountRepository: IAccountRepository,
   ) {}
 
-  async execute(id: string): Promise<AccountResponse> {
+  async execute(id: string, currentUser: UserProfile): Promise<AccountResponse> {
     const account = await this.accountRepository.findById(id);
     if (!account) {
       throw new NotFoundException(`Account with id "${id}" was not found`);
     }
+
+    assertCanReadCustomer(currentUser, account.customerId);
 
     return {
       id: account.id,
@@ -181,9 +185,21 @@ export class ListAccountsUseCase {
     private readonly accountRepository: IAccountRepository,
   ) {}
 
-  async execute(customerId?: string): Promise<AccountResponse[]> {
-    const accounts = customerId
-      ? await this.accountRepository.findByCustomerId(customerId)
+  async execute(currentUser: UserProfile, customerId?: string): Promise<AccountResponse[]> {
+    let accessibleCustomerId = customerId;
+
+    if (currentUser.role === 'user') {
+      if (!currentUser.customerId) {
+        return [];
+      }
+      if (customerId && customerId !== currentUser.customerId) {
+        assertCanReadCustomer(currentUser, customerId);
+      }
+      accessibleCustomerId = currentUser.customerId;
+    }
+
+    const accounts = accessibleCustomerId
+      ? await this.accountRepository.findByCustomerId(accessibleCustomerId)
       : await this.accountRepository.findAll();
 
     return accounts.map(account => ({
@@ -329,11 +345,16 @@ export class ReconcileAccountUseCase {
     private readonly ledgerRepository: ILedgerRepository,
   ) {}
 
-  async execute(accountId: string): Promise<LedgerReconciliationResponse> {
+  async execute(
+    accountId: string,
+    currentUser: UserProfile,
+  ): Promise<LedgerReconciliationResponse> {
     const account = await this.accountRepository.findById(accountId);
     if (!account) {
       throw new NotFoundException(`Account with id "${accountId}" was not found`);
     }
+
+    assertCanReadCustomer(currentUser, account.customerId);
 
     const { totalDebits, totalCredits, netBalance } =
       await this.ledgerRepository.calculateAccountBalance(accountId);

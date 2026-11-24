@@ -5,10 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
+import { createTestAccessToken } from '../../testing/auth-test-helper';
 
 describe('Payments Module Integration Tests', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let adminToken: string;
   let customerId: string;
   let accountId: string;
 
@@ -22,6 +24,7 @@ describe('Payments Module Integration Tests', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    adminToken = createTestAccessToken(app, { role: 'admin' });
   });
 
   afterAll(async () => {
@@ -69,6 +72,7 @@ describe('Payments Module Integration Tests', () => {
       const idempotencyKey = randomUUID();
       const res = await request(app.getHttpServer())
         .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: accountId,
           amount: 5000,
@@ -124,6 +128,7 @@ describe('Payments Module Integration Tests', () => {
       const idempotencyKey = randomUUID();
       const createRes = await request(app.getHttpServer())
         .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: accountId,
           amount: 2500,
@@ -135,6 +140,7 @@ describe('Payments Module Integration Tests', () => {
 
       const getRes = await request(app.getHttpServer())
         .get(`/payments/${createRes.body.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
       expect(getRes.body.id).toBe(createRes.body.id);
@@ -153,8 +159,16 @@ describe('Payments Module Integration Tests', () => {
         idempotencyKey,
       };
 
-      const res1 = await request(app.getHttpServer()).post('/payments').send(payload).expect(201);
-      const res2 = await request(app.getHttpServer()).post('/payments').send(payload).expect(201);
+      const res1 = await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(payload)
+        .expect(201);
+      const res2 = await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(payload)
+        .expect(201);
 
       expect(res1.body.id).toBe(res2.body.id);
 
@@ -171,6 +185,7 @@ describe('Payments Module Integration Tests', () => {
 
       await request(app.getHttpServer())
         .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: accountId,
           amount: 3000,
@@ -182,6 +197,7 @@ describe('Payments Module Integration Tests', () => {
 
       const conflictRes = await request(app.getHttpServer())
         .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: accountId,
           amount: 9999,
@@ -201,6 +217,7 @@ describe('Payments Module Integration Tests', () => {
     it('should reject payment with incompatible currency (400 Bad Request)', async () => {
       await request(app.getHttpServer())
         .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: accountId,
           amount: 1000,
@@ -214,6 +231,7 @@ describe('Payments Module Integration Tests', () => {
     it('should reject payment for non-existent account (404 Not Found)', async () => {
       await request(app.getHttpServer())
         .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
           destinationAccountId: randomUUID(),
           amount: 1000,

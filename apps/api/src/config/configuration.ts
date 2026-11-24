@@ -5,12 +5,23 @@ import { z } from 'zod';
  * Enforces fail-fast validation during application bootstrap to prevent
  * runtime failures caused by missing or misconfigured infrastructure settings.
  */
-export const environmentSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().default(3001),
-  DATABASE_URL: z.string().url(),
-  CORS_ORIGIN: z.string().default('http://localhost:3000'),
-});
+export const environmentSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().default(3001),
+    DATABASE_URL: z.string().url(),
+    CORS_ORIGIN: z.string().default('http://localhost:3000'),
+    JWT_SECRET: z.string().min(32).optional(),
+  })
+  .superRefine((config, context) => {
+    if (config.NODE_ENV === 'production' && !config.JWT_SECRET) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message: 'JWT_SECRET is required in production',
+      });
+    }
+  });
 
 export type EnvironmentConfig = z.infer<typeof environmentSchema>;
 

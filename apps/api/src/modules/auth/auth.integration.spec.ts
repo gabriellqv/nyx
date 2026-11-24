@@ -7,6 +7,7 @@ import { AppModule } from '../../app.module';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
 import { CORRELATION_ID_HEADER } from '../../common/middleware/correlation-id.middleware';
+import { createTestAccessToken } from '../../testing/auth-test-helper';
 
 describe('Auth, Security, and Audit Integration Tests', () => {
   let app: INestApplication;
@@ -31,6 +32,9 @@ describe('Auth, Security, and Audit Integration Tests', () => {
   });
 
   beforeEach(async () => {
+    await prisma.webhookDelivery.deleteMany();
+    await prisma.outboxEvent.deleteMany();
+    await prisma.payment.deleteMany();
     await prisma.auditLog.deleteMany();
     await prisma.user.deleteMany();
     await prisma.ledgerEntry.deleteMany();
@@ -98,6 +102,39 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
       await request(app.getHttpServer()).post('/auth/register').send(invalidPayload).expect(400);
     });
+
+    it('should ignore privileged role and customer association from public registration', async () => {
+      const customerId = randomUUID();
+      await prisma.customer.create({
+        data: {
+          id: customerId,
+          name: 'Existing Customer',
+          email: 'existing.customer@nyx.local',
+          documentNumber: `DOC-REG-${Date.now()}`,
+          status: 'active',
+        },
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          name: 'Untrusted Registrant',
+          email: 'untrusted@nyx.local',
+          password: 'securePassword123!',
+          role: 'admin',
+          customerId,
+        })
+        .expect(201);
+
+      expect(res.body.user.role).toBe('user');
+      expect(res.body.user.customerId).toBeNull();
+
+      const user = await prisma.user.findUnique({
+        where: { email: 'untrusted@nyx.local' },
+      });
+      expect(user?.role).toBe('user');
+      expect(user?.customerId).toBeNull();
+    });
   });
 
   describe('2. User Authentication and Credential Verification', () => {
@@ -156,7 +193,6 @@ describe('Auth, Security, and Audit Integration Tests', () => {
         name: 'Protected User',
         email: 'protected@nyx.local',
         password: 'securePassword123!',
-        role: 'auditor',
       });
       validToken = regRes.body.accessToken;
     });
@@ -170,7 +206,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
       expect(res.body).toMatchObject({
         email: 'protected@nyx.local',
         name: 'Protected User',
-        role: 'auditor',
+        role: 'user',
       });
     });
 
@@ -184,6 +220,10 @@ describe('Auth, Security, and Audit Integration Tests', () => {
         .set('Authorization', 'Bearer invalid.token.payload')
         .expect(401);
     });
+
+    it('should reject anonymous access to account data', async () => {
+      await request(app.getHttpServer()).get('/accounts').expect(401);
+    });
   });
 
   describe('4. Account Ownership and Authorization Boundaries', () => {
@@ -192,6 +232,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
     let accountAId: string;
     let accountBId: string;
     let tokenUserA: string;
+    let tokenUserB: string;
     let tokenAdmin: string;
 
     beforeEach(async () => {
@@ -241,22 +282,19 @@ describe('Auth, Security, and Audit Integration Tests', () => {
         },
       });
 
-      const regUserA = await request(app.getHttpServer()).post('/auth/register').send({
-        name: 'User A',
-        email: 'usera@nyx.local',
-        password: 'password123',
+      tokenUserA = createTestAccessToken(app, {
         role: 'user',
         customerId: customerAId,
       });
-      tokenUserA = regUserA.body.accessToken;
 
-      const regAdmin = await request(app.getHttpServer()).post('/auth/register').send({
-        name: 'Admin User',
-        email: 'admin@nyx.local',
-        password: 'password123',
+      tokenUserB = createTestAccessToken(app, {
+        role: 'user',
+        customerId: customerBId,
+      });
+
+      tokenAdmin = createTestAccessToken(app, {
         role: 'admin',
       });
-      tokenAdmin = regAdmin.body.accessToken;
     });
 
     it('should reject transfer when user attempts to debit an account owned by another customer (403 Forbidden)', async () => {
@@ -273,6 +311,135 @@ describe('Auth, Security, and Audit Integration Tests', () => {
         .expect(403);
 
       expect(res.body.message).toContain('not authorized to debit this source account');
+    });
+
+    it('should reject access to an account owned by another customer', async () => {
+      await request(app.getHttpServer())
+        .get(`/accounts/${accountBId}`)
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .expect(403);
+    });
+
+    it('should list only accounts owned by the authenticated customer', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/accounts')
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .expect(200);
+
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].id).toBe(accountAId);
+    });
+
+    it('should reject financial operations for a user without a customer association', async () => {
+      const tokenWithoutCustomer = createTestAccessToken(app, { role: 'user' });
+
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${tokenWithoutCustomer}`)
+        .send({
+          idempotencyKey: randomUUID(),
+          sourceAccountId: accountAId,
+          destinationAccountId: accountBId,
+          amount: 1000,
+          currency: 'USD',
+        })
+        .expect(403);
+    });
+
+    it('should enforce source account ownership on an idempotent transfer retry', async () => {
+      const payload = {
+        idempotencyKey: randomUUID(),
+        sourceAccountId: accountAId,
+        destinationAccountId: accountBId,
+        amount: 1000,
+        currency: 'USD',
+      };
+
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .send(payload)
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${tokenUserB}`)
+        .send(payload)
+        .expect(403);
+    });
+
+    it('should prevent regular users from depositing funds', async () => {
+      await request(app.getHttpServer())
+        .post(`/accounts/${accountAId}/deposit`)
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .send({
+          amount: 1000,
+          idempotencyKey: randomUUID(),
+        })
+        .expect(403);
+    });
+
+    it('should restrict administrative financial endpoints by role', async () => {
+      await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .send({})
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .post('/reconciliation/run')
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .send({})
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .post('/webhooks/endpoints')
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .send({})
+        .expect(403);
+    });
+
+    it('should enforce account ownership when reading payments', async () => {
+      const payment = await request(app.getHttpServer())
+        .post('/payments')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          destinationAccountId: accountAId,
+          amount: 1000,
+          currency: 'USD',
+          method: 'pix',
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .get(`/payments/${payment.body.id}`)
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/payments/${payment.body.id}`)
+        .set('Authorization', `Bearer ${tokenUserB}`)
+        .expect(403);
+    });
+
+    it('should allow auditors to read accounts without granting write access', async () => {
+      const auditorToken = createTestAccessToken(app, { role: 'auditor' });
+
+      const accounts = await request(app.getHttpServer())
+        .get('/accounts')
+        .set('Authorization', `Bearer ${auditorToken}`)
+        .expect(200);
+      expect(accounts.body).toHaveLength(2);
+
+      await request(app.getHttpServer())
+        .post(`/accounts/${accountAId}/deposit`)
+        .set('Authorization', `Bearer ${auditorToken}`)
+        .send({
+          amount: 1000,
+          idempotencyKey: randomUUID(),
+        })
+        .expect(403);
     });
 
     it('should allow transfer when user debits their own account (201 Created)', async () => {
@@ -310,6 +477,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
   describe('5. Immutable Audit Trail Persistence', () => {
     it('should record audit logs when creating accounts, depositing funds, and executing transfers', async () => {
+      const tokenAdmin = createTestAccessToken(app, { role: 'admin' });
       const custId = randomUUID();
       await prisma.customer.create({
         data: {
@@ -323,6 +491,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
       const accRes1 = await request(app.getHttpServer())
         .post('/accounts')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           customerId: custId,
           currency: 'USD',
@@ -333,6 +502,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
       const accRes2 = await request(app.getHttpServer())
         .post('/accounts')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           customerId: custId,
           currency: 'USD',
@@ -347,6 +517,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
       await request(app.getHttpServer())
         .post(`/accounts/${accRes2.body.id}/deposit`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           amount: 5000,
           currency: 'USD',
@@ -361,6 +532,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
       const transferRes = await request(app.getHttpServer())
         .post('/transfers')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           idempotencyKey: randomUUID(),
           sourceAccountId: accRes1.body.id,
@@ -378,6 +550,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
 
       await request(app.getHttpServer())
         .post(`/transfers/${transferRes.body.id}/reverse`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
         .send({
           reason: 'Audit test reversal',
           idempotencyKey: randomUUID(),

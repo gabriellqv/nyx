@@ -99,7 +99,9 @@ nyx/
 
 ## Security
 
-- JWT authentication with role claims and three roles: `admin`, `operator`, `auditor`.
+- JWT authentication with role claims and three roles: `admin`, `user`, `auditor`.
+- Authentication is required by default. Health checks, metrics, login, and public registration are the explicit public routes.
+- Public registration always creates an unprivileged user without customer ownership. The initial administrator is provisioned through the local administration command.
 - Transfers check that the caller owns or is authorized over the source account.
 - Authentication, account creation, manual adjustments, and webhook changes are written to an append-only `AuditLog` with user, IP, user agent, correlation ID, and state diff.
 - Outgoing webhooks carry an `X-Nyx-Signature` HMAC-SHA256 over a timestamped body, so consumers can reject tampered or replayed requests.
@@ -138,8 +140,11 @@ cp .env.example .env
 docker compose up -d postgres
 pnpm install
 pnpm --filter @nyx/api exec prisma migrate dev
+pnpm --filter @nyx/api admin:create
 pnpm dev
 ```
+
+Set `NYX_ADMIN_EMAIL` and `NYX_ADMIN_PASSWORD` before running `admin:create`. Public registration always creates an unprivileged user and cannot assign roles or customer ownership.
 
 - API: `http://localhost:3000`
 - Web: `http://localhost:3001`
