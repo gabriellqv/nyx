@@ -43,7 +43,7 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   const result = environmentSchema.safeParse(config);
 
   if (!result.success) {
-    const errorDetails = result.error.errors
+    const errorDetails = result.error.issues
       .map(err => `${err.path.join('.')}: ${err.message}`)
       .join('; ');
     throw new Error(`Environment validation failed: ${errorDetails}`);

@@ -163,7 +163,7 @@ describe('Financial Domain Integration Tests', () => {
 
       expect(response.body).toHaveProperty('id');
       expect(response.body.status).toBe('posted');
-      expect(response.body.amount).toBe(transferAmount);
+      expect(response.body.amount).toBe(String(transferAmount));
 
       const audit = await prisma.auditLog.findFirst({
         where: { action: 'TRANSFER_POSTED', resourceId: response.body.id },
@@ -208,7 +208,7 @@ describe('Financial Domain Integration Tests', () => {
         .expect(200);
 
       expect(reconA.body.isReconciled).toBe(true);
-      expect(reconA.body.discrepancy).toBe(0);
+      expect(reconA.body.discrepancy).toBe('0');
     });
 
     it('should roll back a transfer when its audit record cannot be written', async () => {
@@ -438,6 +438,100 @@ describe('Financial Domain Integration Tests', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ ...requestBody, description: 'Changed description' })
         .expect(409);
+    });
+
+    it('should preserve amounts above the JavaScript safe integer range in requests and responses', async () => {
+      const exactAmount = 9007199254740993n;
+      await prisma.account.update({
+        where: { id: accountAId },
+        data: { balance: exactAmount },
+      });
+
+      const response = await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          idempotencyKey: randomUUID(),
+          sourceAccountId: accountAId,
+          destinationAccountId: accountBId,
+          amount: exactAmount.toString(),
+          currency: 'USD',
+        })
+        .expect(201);
+
+      expect(response.body.amount).toBe(exactAmount.toString());
+      const sourceAccount = await prisma.account.findUnique({ where: { id: accountAId } });
+      expect(sourceAccount?.balance).toBe(0n);
+
+      const accountResponse = await request(app.getHttpServer())
+        .get(`/accounts/${accountBId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(accountResponse.body.balance).toBe((exactAmount + 20000n).toString());
+    });
+
+    it('should reject unsafe numeric amounts instead of accepting rounded JSON numbers', async () => {
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          idempotencyKey: randomUUID(),
+          sourceAccountId: accountAId,
+          destinationAccountId: accountBId,
+          amount: Number.MAX_SAFE_INTEGER + 1,
+          currency: 'USD',
+        })
+        .expect(400);
+    });
+
+    it('should reject minor-unit amounts beyond the PostgreSQL bigint range', async () => {
+      await request(app.getHttpServer())
+        .post('/transfers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          idempotencyKey: randomUUID(),
+          sourceAccountId: accountAId,
+          destinationAccountId: accountBId,
+          amount: '9223372036854775808',
+          currency: 'USD',
+        })
+        .expect(400);
+    });
+
+    it('should page through transfer history with an opaque cursor', async () => {
+      for (let index = 0; index < 3; index++) {
+        await request(app.getHttpServer())
+          .post('/transfers')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            idempotencyKey: randomUUID(),
+            sourceAccountId: accountAId,
+            destinationAccountId: accountBId,
+            amount: 1000,
+            currency: 'USD',
+          })
+          .expect(201);
+      }
+
+      const firstPage = await request(app.getHttpServer())
+        .get('/transfers?limit=2')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(firstPage.body.items).toHaveLength(2);
+      expect(firstPage.body.hasMore).toBe(true);
+      expect(firstPage.body.nextCursor).toBeDefined();
+
+      const secondPage = await request(app.getHttpServer())
+        .get(`/transfers?limit=2&cursor=${firstPage.body.nextCursor}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(secondPage.body.items).toHaveLength(1);
+      expect(secondPage.body.hasMore).toBe(false);
+      expect(firstPage.body.items.map((item: { id: string }) => item.id)).not.toContain(
+        secondPage.body.items[0].id,
+      );
     });
   });
 

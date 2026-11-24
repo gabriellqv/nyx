@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { nonNegativeMinorUnitStringSchema, signedMinorUnitStringSchema } from './money.contract';
 
 /**
  * Reconciliation operational health status.
@@ -13,9 +14,9 @@ export const accountReconciliationDetailSchema = z.object({
   accountId: z.string().uuid(),
   accountNumber: z.string(),
   currency: z.string().length(3),
-  accountBalance: z.number().int(),
-  ledgerBalance: z.number().int(),
-  discrepancy: z.number().int(),
+  accountBalance: nonNegativeMinorUnitStringSchema,
+  ledgerBalance: signedMinorUnitStringSchema,
+  discrepancy: signedMinorUnitStringSchema,
   isBalanced: z.boolean(),
 });
 export type AccountReconciliationDetail = z.infer<typeof accountReconciliationDetailSchema>;

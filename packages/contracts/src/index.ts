@@ -7,3 +7,5 @@ export * from './auth.contract.js';
 export * from './webhooks.contract.js';
 export * from './payments.contract.js';
 export * from './reconciliation.contract.js';
+export * from './money.contract.js';
+export * from './pagination.contract.js';

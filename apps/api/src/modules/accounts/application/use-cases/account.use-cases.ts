@@ -12,6 +12,7 @@ import type {
   DepositRequest,
   LedgerReconciliationResponse,
   UserProfile,
+  AccountPageResponse,
 } from '@nyx/contracts';
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Account } from '../../domain/entities/account.entity';
@@ -29,6 +30,7 @@ import { PrismaService } from '../../../../infrastructure/database/prisma.servic
 import { AuditRequestContext, AuditService } from '../../../audit/audit.service';
 import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
 import { hashRequest } from '../../../common/application/request-hash';
+import type { CursorPagination } from '../../../common/application/cursor-pagination';
 
 @Injectable()
 export class CreateAccountUseCase {
@@ -52,7 +54,7 @@ export class CreateAccountUseCase {
     const accountId = randomUUID();
     const accountNumber = `ACC-${Math.floor(10000000 + Math.random() * 90000000)}`;
 
-    const initialAmount = Money.fromCents(dto.initialDeposit, dto.currency);
+    const initialAmount = Money.fromMinorUnits(dto.initialDeposit, dto.currency);
 
     const account = new Account({
       id: accountId,
@@ -152,7 +154,7 @@ export class CreateAccountUseCase {
       currency: account.currency,
       type: account.type,
       status: account.status,
-      balance: account.balance.amountNumber,
+      balance: account.balance.amount.toString(),
       createdAt: account.createdAt.toISOString(),
       updatedAt: account.updatedAt.toISOString(),
     };
@@ -181,7 +183,7 @@ export class GetAccountUseCase {
       currency: account.currency,
       type: account.type,
       status: account.status,
-      balance: account.balance.amountNumber,
+      balance: account.balance.amount.toString(),
       createdAt: account.createdAt.toISOString(),
       updatedAt: account.updatedAt.toISOString(),
     };
@@ -195,12 +197,16 @@ export class ListAccountsUseCase {
     private readonly accountRepository: IAccountRepository,
   ) {}
 
-  async execute(currentUser: UserProfile, customerId?: string): Promise<AccountResponse[]> {
+  async execute(
+    currentUser: UserProfile,
+    customerId: string | undefined,
+    pagination: CursorPagination,
+  ): Promise<AccountPageResponse> {
     let accessibleCustomerId = customerId;
 
     if (currentUser.role === 'user') {
       if (!currentUser.customerId) {
-        return [];
+        return { items: [], nextCursor: null, hasMore: false };
       }
       if (customerId && customerId !== currentUser.customerId) {
         assertCanReadCustomer(currentUser, customerId);
@@ -208,21 +214,24 @@ export class ListAccountsUseCase {
       accessibleCustomerId = currentUser.customerId;
     }
 
-    const accounts = accessibleCustomerId
-      ? await this.accountRepository.findByCustomerId(accessibleCustomerId)
-      : await this.accountRepository.findAll();
+    const page = accessibleCustomerId
+      ? await this.accountRepository.findByCustomerId(accessibleCustomerId, pagination)
+      : await this.accountRepository.findAll(pagination);
 
-    return accounts.map(account => ({
-      id: account.id,
-      customerId: account.customerId,
-      accountNumber: account.accountNumber,
-      currency: account.currency,
-      type: account.type,
-      status: account.status,
-      balance: account.balance.amountNumber,
-      createdAt: account.createdAt.toISOString(),
-      updatedAt: account.updatedAt.toISOString(),
-    }));
+    return {
+      ...page,
+      items: page.items.map(account => ({
+        id: account.id,
+        customerId: account.customerId,
+        accountNumber: account.accountNumber,
+        currency: account.currency,
+        type: account.type,
+        status: account.status,
+        balance: account.balance.amount.toString(),
+        createdAt: account.createdAt.toISOString(),
+        updatedAt: account.updatedAt.toISOString(),
+      })),
+    };
   }
 }
 
@@ -246,7 +255,7 @@ export class DepositFundsUseCase {
       throw new NotFoundException(`Account with id "${accountId}" was not found`);
     }
 
-    const depositAmount = Money.fromCents(dto.amount, account.currency);
+    const depositAmount = Money.fromMinorUnits(dto.amount, account.currency);
     const requestHash = hashRequest({
       accountId,
       amount: dto.amount,
@@ -302,7 +311,9 @@ export class DepositFundsUseCase {
           );
         }
 
-        const newBalance = lockedAccount.balance + depositAmount.amount;
+        const newBalance = Money.fromMinorUnits(lockedAccount.balance, account.currency).add(
+          depositAmount,
+        ).amount;
 
         const updatedAccount = await tx.account.update({
           where: { id: accountId },
@@ -362,7 +373,7 @@ export class DepositFundsUseCase {
           currency: updatedAccount.currency,
           type: updatedAccount.type as AccountResponse['type'],
           status: updatedAccount.status as AccountResponse['status'],
-          balance: Number(updatedAccount.balance),
+          balance: updatedAccount.balance.toString(),
           createdAt: updatedAccount.createdAt.toISOString(),
           updatedAt: updatedAccount.updatedAt.toISOString(),
         };
@@ -387,7 +398,7 @@ export class DepositFundsUseCase {
             resourceType: 'account',
             resourceId: accountId,
             details: {
-              amount: depositAmount.amountNumber,
+              amount: depositAmount.amount.toString(),
               currency: depositAmount.currency,
               idempotencyKey: dto.idempotencyKey,
             },
@@ -442,16 +453,16 @@ export class ReconcileAccountUseCase {
       await this.ledgerRepository.calculateAccountBalance(accountId);
 
     const isReconciled = account.balance.amount === netBalance;
-    const discrepancy = Number(account.balance.amount - netBalance);
+    const discrepancy = account.balance.amount - netBalance;
 
     return {
       accountId,
-      accountBalance: account.balance.amountNumber,
-      ledgerDerivedBalance: Number(netBalance),
+      accountBalance: account.balance.amount.toString(),
+      ledgerDerivedBalance: netBalance.toString(),
       isReconciled,
-      totalDebits: Number(totalDebits),
-      totalCredits: Number(totalCredits),
-      discrepancy,
+      totalDebits: totalDebits.toString(),
+      totalCredits: totalCredits.toString(),
+      discrepancy: discrepancy.toString(),
     };
   }
 }

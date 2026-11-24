@@ -327,8 +327,52 @@ describe('Auth, Security, and Audit Integration Tests', () => {
         .set('Authorization', `Bearer ${tokenUserA}`)
         .expect(200);
 
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].id).toBe(accountAId);
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].id).toBe(accountAId);
+    });
+
+    it('should page through owned accounts without duplicates', async () => {
+      const thirdAccountId = randomUUID();
+      await prisma.account.create({
+        data: {
+          id: thirdAccountId,
+          customerId: customerAId,
+          accountNumber: 'ACC-A-002',
+          currency: 'USD',
+          balance: 0n,
+        },
+      });
+
+      const firstPage = await request(app.getHttpServer())
+        .get('/accounts?limit=1')
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .expect(200);
+
+      expect(firstPage.body.items).toHaveLength(1);
+      expect(firstPage.body.hasMore).toBe(true);
+
+      const secondPage = await request(app.getHttpServer())
+        .get(`/accounts?limit=1&cursor=${firstPage.body.nextCursor}`)
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .expect(200);
+
+      expect(secondPage.body.items).toHaveLength(1);
+      expect(secondPage.body.hasMore).toBe(false);
+      expect(firstPage.body.items[0].id).not.toBe(secondPage.body.items[0].id);
+    });
+
+    it('should return large account balances without converting them to numbers', async () => {
+      await prisma.account.update({
+        where: { id: accountAId },
+        data: { balance: 9007199254740993n },
+      });
+
+      const response = await request(app.getHttpServer())
+        .get(`/accounts/${accountAId}`)
+        .set('Authorization', `Bearer ${tokenUserA}`)
+        .expect(200);
+
+      expect(response.body.balance).toBe('9007199254740993');
     });
 
     it('should reject financial operations for a user without a customer association', async () => {
@@ -478,7 +522,7 @@ describe('Auth, Security, and Audit Integration Tests', () => {
         .get('/accounts')
         .set('Authorization', `Bearer ${auditorToken}`)
         .expect(200);
-      expect(accounts.body).toHaveLength(2);
+      expect(accounts.body.items).toHaveLength(2);
 
       await request(app.getHttpServer())
         .post(`/accounts/${accountAId}/deposit`)

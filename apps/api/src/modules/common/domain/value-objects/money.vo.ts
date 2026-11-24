@@ -2,25 +2,45 @@ import { CurrencyMismatchException, InvalidAmountException } from '../exceptions
 
 /**
  * Value object representing a monetary amount with an explicit ISO 4217 currency.
- * Guarantees exact integer arithmetic in minor currency units (cents) to avoid
+ * Guarantees exact integer arithmetic in minor currency units to avoid
  * JavaScript floating-point rounding errors.
  */
 export class Money {
-  private readonly cents: bigint;
+  private static readonly maxMinorUnits = 9_223_372_036_854_775_807n;
+  private readonly minorUnits: bigint;
   private readonly currencyCode: string;
 
-  private constructor(cents: bigint, currencyCode: string) {
-    this.cents = cents;
+  private constructor(minorUnits: bigint, currencyCode: string) {
+    if (minorUnits > Money.maxMinorUnits) {
+      throw new InvalidAmountException('Monetary amount exceeds the supported database range');
+    }
+    this.minorUnits = minorUnits;
     this.currencyCode = currencyCode.toUpperCase();
   }
 
   /**
-   * Creates a Money instance from minor units (e.g., cents, centavos).
+   * Creates a Money instance from ISO currency minor units.
    */
-  static fromCents(cents: number | bigint, currencyCode: string): Money {
-    const value = typeof cents === 'number' ? BigInt(cents) : cents;
+  static fromMinorUnits(minorUnits: number | bigint | string, currencyCode: string): Money {
+    let value: bigint;
+    if (typeof minorUnits === 'number') {
+      if (!Number.isSafeInteger(minorUnits)) {
+        throw new InvalidAmountException('Monetary amount must be a safe integer');
+      }
+      value = BigInt(minorUnits);
+    } else if (typeof minorUnits === 'string') {
+      if (!/^(0|[1-9]\d{0,18})$/.test(minorUnits)) {
+        throw new InvalidAmountException('Monetary amount must be an integer minor-unit string');
+      }
+      value = BigInt(minorUnits);
+    } else {
+      value = minorUnits;
+    }
     if (value < 0n) {
       throw new InvalidAmountException('Monetary amount in minor units cannot be negative');
+    }
+    if (value > Money.maxMinorUnits) {
+      throw new InvalidAmountException('Monetary amount exceeds the supported database range');
     }
     return new Money(value, currencyCode);
   }
@@ -33,11 +53,7 @@ export class Money {
   }
 
   get amount(): bigint {
-    return this.cents;
-  }
-
-  get amountNumber(): number {
-    return Number(this.cents);
+    return this.minorUnits;
   }
 
   get currency(): string {
@@ -46,37 +62,37 @@ export class Money {
 
   add(other: Money): Money {
     this.assertSameCurrency(other);
-    return new Money(this.cents + other.cents, this.currencyCode);
+    return new Money(this.minorUnits + other.minorUnits, this.currencyCode);
   }
 
   subtract(other: Money): Money {
     this.assertSameCurrency(other);
-    if (this.cents < other.cents) {
+    if (this.minorUnits < other.minorUnits) {
       throw new InvalidAmountException('Resulting monetary balance cannot be negative');
     }
-    return new Money(this.cents - other.cents, this.currencyCode);
+    return new Money(this.minorUnits - other.minorUnits, this.currencyCode);
   }
 
   equals(other: Money): boolean {
-    return this.currencyCode === other.currencyCode && this.cents === other.cents;
+    return this.currencyCode === other.currencyCode && this.minorUnits === other.minorUnits;
   }
 
   isGreaterThan(other: Money): boolean {
     this.assertSameCurrency(other);
-    return this.cents > other.cents;
+    return this.minorUnits > other.minorUnits;
   }
 
   isGreaterThanOrEqual(other: Money): boolean {
     this.assertSameCurrency(other);
-    return this.cents >= other.cents;
+    return this.minorUnits >= other.minorUnits;
   }
 
   isPositive(): boolean {
-    return this.cents > 0n;
+    return this.minorUnits > 0n;
   }
 
   isZero(): boolean {
-    return this.cents === 0n;
+    return this.minorUnits === 0n;
   }
 
   private assertSameCurrency(other: Money): void {

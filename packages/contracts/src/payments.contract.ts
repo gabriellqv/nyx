@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { cursorPageResponseSchema } from './pagination.contract';
+import { positiveMinorUnitInputSchema, positiveMinorUnitStringSchema } from './money.contract';
 
 /**
  * Supported payment methods for incoming funds.
@@ -17,10 +19,7 @@ export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
  */
 export const createPaymentSchema = z.object({
   destinationAccountId: z.string().uuid({ message: 'Destination account ID must be a valid UUID' }),
-  amount: z
-    .number()
-    .int({ message: 'Amount must be an integer representing minor units (cents)' })
-    .positive({ message: 'Amount must be greater than zero' }),
+  amount: positiveMinorUnitInputSchema,
   currency: z
     .string()
     .length(3, { message: 'Currency must be an ISO 4217 three-letter code' })
@@ -40,7 +39,7 @@ export type CreatePaymentRequest = z.infer<typeof createPaymentSchema>;
 export const paymentResponseSchema = z.object({
   id: z.string().uuid(),
   destinationAccountId: z.string().uuid(),
-  amount: z.number().int().positive(),
+  amount: positiveMinorUnitStringSchema,
   currency: z.string().length(3),
   method: paymentMethodSchema,
   status: paymentStatusSchema,
@@ -50,3 +49,5 @@ export const paymentResponseSchema = z.object({
   completedAt: z.string().datetime().nullable().optional(),
 });
 export type PaymentResponse = z.infer<typeof paymentResponseSchema>;
+export const paymentPageResponseSchema = cursorPageResponseSchema(paymentResponseSchema);
+export type PaymentPageResponse = z.infer<typeof paymentPageResponseSchema>;

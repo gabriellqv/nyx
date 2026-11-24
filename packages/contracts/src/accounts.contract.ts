@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import { cursorPageResponseSchema } from './pagination.contract';
+import {
+  minorUnitInputSchema,
+  nonNegativeMinorUnitStringSchema,
+  positiveMinorUnitInputSchema,
+} from './money.contract';
 
 /**
  * Account category classification.
@@ -22,17 +28,13 @@ export const createAccountSchema = z.object({
     .length(3, { message: 'Currency must be an ISO 4217 three-letter code' })
     .toUpperCase(),
   type: accountTypeSchema.default('checking'),
-  initialDeposit: z
-    .number()
-    .int({ message: 'Initial deposit must be in minor units (cents)' })
-    .nonnegative({ message: 'Initial deposit cannot be negative' })
-    .default(0),
+  initialDeposit: minorUnitInputSchema.default('0'),
 });
 export type CreateAccountRequest = z.infer<typeof createAccountSchema>;
 
 /**
  * Account representation returned by API endpoints.
- * Balances are represented as integer minor units (cents).
+ * Balances are decimal strings containing integer minor currency units.
  */
 export const accountResponseSchema = z.object({
   id: z.string().uuid(),
@@ -41,20 +43,19 @@ export const accountResponseSchema = z.object({
   currency: z.string().length(3),
   type: accountTypeSchema,
   status: accountStatusSchema,
-  balance: z.number().int(),
+  balance: nonNegativeMinorUnitStringSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 export type AccountResponse = z.infer<typeof accountResponseSchema>;
+export const accountPageResponseSchema = cursorPageResponseSchema(accountResponseSchema);
+export type AccountPageResponse = z.infer<typeof accountPageResponseSchema>;
 
 /**
  * Contract schema for loading initial funds or manual balance adjustments.
  */
 export const depositRequestSchema = z.object({
-  amount: z
-    .number()
-    .int({ message: 'Amount must be an integer in minor units (cents)' })
-    .positive({ message: 'Amount must be greater than zero' }),
+  amount: positiveMinorUnitInputSchema,
   idempotencyKey: z
     .string()
     .min(1, { message: 'Idempotency key is required' })

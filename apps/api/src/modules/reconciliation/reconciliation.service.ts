@@ -71,9 +71,9 @@ export class ReconciliationService {
         accountId: account.id,
         accountNumber: account.accountNumber,
         currency: account.currency,
-        accountBalance: Number(accountBalance),
-        ledgerBalance: Number(ledgerBalance),
-        discrepancy: Number(discrepancy),
+        accountBalance: accountBalance.toString(),
+        ledgerBalance: ledgerBalance.toString(),
+        discrepancy: discrepancy.toString(),
         isBalanced,
       });
     }

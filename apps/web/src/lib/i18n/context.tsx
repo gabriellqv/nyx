@@ -9,7 +9,7 @@ interface I18nContextValue {
   locale: Locale;
   setLocale: (locale: Locale) => void;
   t: TranslationDictionary;
-  formatMoney: (cents: number, currency?: string) => string;
+  formatMoney: (minorUnits: string | number | bigint, currency?: string) => string;
 }
 
 const dictionaries: Record<Locale, TranslationDictionary> = {
@@ -51,12 +51,41 @@ export function I18nProvider({ children }: { children: React.ReactNode }): React
 
   const t = dictionaries[locale] ?? dictionaries.en;
 
-  const formatMoney = (cents: number, currency = 'USD'): string => {
+  const formatMoney = (minorUnits: string | number | bigint, currency = 'USD'): string => {
     const intlLocale = locale === 'pt-BR' ? 'pt-BR' : 'en-US';
-    return new Intl.NumberFormat(intlLocale, {
+    const formatter = new Intl.NumberFormat(intlLocale, {
       style: 'currency',
       currency,
-    }).format(cents / 100);
+    });
+    const amount =
+      typeof minorUnits === 'number'
+        ? Number.isSafeInteger(minorUnits)
+          ? BigInt(minorUnits)
+          : (() => {
+              throw new Error('Monetary values provided as numbers must be safe integers');
+            })()
+        : BigInt(minorUnits);
+    const fractionDigits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+    const scale = 10n ** BigInt(fractionDigits);
+    const absoluteAmount = amount < 0n ? -amount : amount;
+    const majorUnits = absoluteAmount / scale;
+    const fraction = (absoluteAmount % scale).toString().padStart(fractionDigits, '0');
+    const formattedMajor = new Intl.NumberFormat(intlLocale, {
+      maximumFractionDigits: 0,
+    }).format(majorUnits);
+    const digitFormatter = new Intl.NumberFormat(intlLocale, { useGrouping: false });
+    const formattedFraction = [...fraction]
+      .map(digit => digitFormatter.format(Number(digit)))
+      .join('');
+
+    return formatter
+      .formatToParts(amount < 0n ? -1 : 0)
+      .map(part => {
+        if (part.type === 'integer') return formattedMajor;
+        if (part.type === 'fraction') return formattedFraction;
+        return part.value;
+      })
+      .join('');
   };
 
   return (

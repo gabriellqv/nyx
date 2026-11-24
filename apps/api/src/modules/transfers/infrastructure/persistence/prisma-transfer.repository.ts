@@ -3,6 +3,7 @@ import { PrismaService } from '../../../../infrastructure/database/prisma.servic
 import { Money } from '../../../common/domain/value-objects/money.vo';
 import { Transfer, TransferStatus } from '../../domain/entities/transfer.entity';
 import { ITransferRepository } from '../../application/ports/transfer.repository';
+import { makeCursorPage } from '../../../common/application/cursor-pagination';
 
 @Injectable()
 export class PrismaTransferRepository implements ITransferRepository {
@@ -18,11 +19,12 @@ export class PrismaTransferRepository implements ITransferRepository {
     return record ? this.toDomain(record) : null;
   }
 
-  async findAll(filters?: {
+  async findAll(filters: {
     accountId?: string | undefined;
     status?: string | undefined;
     customerId?: string | undefined;
-  }): Promise<Transfer[]> {
+    pagination: { limit: number; cursor?: string | undefined };
+  }) {
     const where: Record<string, unknown> = {};
 
     if (filters?.accountId) {
@@ -54,10 +56,15 @@ export class PrismaTransferRepository implements ITransferRepository {
 
     const records = await this.prisma.transfer.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: filters.pagination.limit + 1,
+      ...(filters.pagination.cursor ? { cursor: { id: filters.pagination.cursor }, skip: 1 } : {}),
     });
 
-    return records.map(r => this.toDomain(r));
+    return makeCursorPage(
+      records.map(r => this.toDomain(r)),
+      filters.pagination.limit,
+    );
   }
 
   async save(transfer: Transfer): Promise<Transfer> {
@@ -107,7 +114,7 @@ export class PrismaTransferRepository implements ITransferRepository {
       requestHash: record.requestHash,
       sourceAccountId: record.sourceAccountId,
       destinationAccountId: record.destinationAccountId,
-      amount: Money.fromCents(record.amount, record.currency),
+      amount: Money.fromMinorUnits(record.amount, record.currency),
       status: record.status as TransferStatus,
       description: record.description,
       failureReason: record.failureReason,

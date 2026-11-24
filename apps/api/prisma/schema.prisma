@@ -49,7 +49,8 @@ model Account {
   incomingTransfers Transfer[]     @relation("DestinationAccount")
   payments          Payment[]
 
-  @@index([customerId])
+  @@index([customerId, createdAt, id])
+  @@index([createdAt, id])
   @@index([status])
   @@map("accounts")
 }
@@ -121,8 +122,9 @@ model Transfer {
   destinationAccount   Account   @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
   reversal              TransferReversal?
 
-  @@index([sourceAccountId])
-  @@index([destinationAccountId])
+  @@index([sourceAccountId, createdAt, id])
+  @@index([destinationAccountId, createdAt, id])
+  @@index([createdAt, id])
   @@index([status])
   @@map("transfers")
 }
@@ -264,7 +266,7 @@ model Payment {
 
   destinationAccount   Account   @relation(fields: [destinationAccountId], references: [id])
 
-  @@index([destinationAccountId])
+  @@index([destinationAccountId, createdAt, id])
   @@index([status])
   @@map("payments")
 }
