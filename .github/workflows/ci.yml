@@ -82,14 +82,19 @@ jobs:
       - name: Run Prisma migrations
         run: pnpm --filter @nyx/api exec prisma migrate deploy
 
-      - name: Install PostgreSQL client tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-
       - name: Verify database backup and restore
-        run: ./infrastructure/scripts/test-backup-restore.sh
+        run: |
+          docker run --rm --network host \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            --env DB_HOST=127.0.0.1 \
+            --env DB_PORT=5433 \
+            --env DB_USER="${DB_USER}" \
+            --env DB_PASSWORD="${DB_PASSWORD}" \
+            --env DB_NAME="${DB_NAME}" \
+            postgres:16-alpine \
+            sh -c 'apk add --no-cache bash coreutils >/dev/null && bash infrastructure/scripts/test-backup-restore.sh'
         env:
-          DB_HOST: localhost
-          DB_PORT: 5433
           DB_USER: nyx_user
           DB_PASSWORD: nyx_password
           DB_NAME: nyx_test
