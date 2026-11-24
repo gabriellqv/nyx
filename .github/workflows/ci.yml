@@ -22,7 +22,7 @@ jobs:
           POSTGRES_PASSWORD: nyx_password
           POSTGRES_DB: nyx_test
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -30,7 +30,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://nyx_user:nyx_password@localhost:5432/nyx_test?schema=public
+      DATABASE_URL: postgresql://nyx_user:nyx_password@localhost:5433/nyx_test?schema=public
 
     steps:
       - name: Checkout repository
@@ -88,7 +88,7 @@ jobs:
         run: ./infrastructure/scripts/test-backup-restore.sh
         env:
           DB_HOST: localhost
-          DB_PORT: 5432
+          DB_PORT: 5433
           DB_USER: nyx_user
           DB_PASSWORD: nyx_password
           DB_NAME: nyx_test
