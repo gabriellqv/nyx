@@ -18,7 +18,7 @@ import { Transfer, TransferStatus } from '../../domain/entities/transfer.entity'
 import { TRANSFER_REPOSITORY, ITransferRepository } from '../ports/transfer.repository';
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
-import { AuditService } from '../../../audit/audit.service';
+import { AuditRequestContext, AuditService } from '../../../audit/audit.service';
 import { OutboxService } from '../../../outbox/outbox.service';
 import { hashRequest, isUniqueConstraintError } from '../../../common/application/request-hash';
 
@@ -43,7 +43,11 @@ export class ExecuteTransferUseCase {
     private readonly outboxService: OutboxService,
   ) {}
 
-  async execute(dto: CreateTransferRequest, currentUser: UserProfile): Promise<TransferResponse> {
+  async execute(
+    dto: CreateTransferRequest,
+    currentUser: UserProfile,
+    auditContext: AuditRequestContext = {},
+  ): Promise<TransferResponse> {
     if (dto.sourceAccountId === dto.destinationAccountId) {
       throw new BadRequestException('Source and destination accounts must be distinct');
     }
@@ -100,7 +104,7 @@ export class ExecuteTransferUseCase {
     const transferId = randomUUID();
 
     // 2. Atomic Database Transaction with Deterministic Ordered Locking
-    let transactionResult: { transfer: Transfer; replayed: boolean };
+    let transactionResult: Transfer;
     try {
       transactionResult = await this.prisma.$transaction(async tx => {
         // Order IDs deterministically to prevent cross-account deadlocks under concurrent requests
@@ -164,7 +168,7 @@ export class ExecuteTransferUseCase {
               `Idempotency key "${dto.idempotencyKey}" was already used with conflicting parameters`,
             );
           }
-          return { transfer: duplicateTransfer, replayed: true };
+          return duplicateTransfer;
         }
 
         // Validate account statuses
@@ -285,20 +289,35 @@ export class ExecuteTransferUseCase {
           tx,
         );
 
-        return {
-          transfer: new Transfer({
-            id: record.id,
-            idempotencyKey: record.idempotencyKey,
-            requestHash: record.requestHash,
-            sourceAccountId: record.sourceAccountId,
-            destinationAccountId: record.destinationAccountId,
-            amount: Money.fromCents(record.amount, record.currency),
-            status: 'posted',
-            description: record.description,
-            completedAt: record.completedAt,
-          }),
-          replayed: false,
-        };
+        await this.auditService.record(
+          {
+            ...auditContext,
+            actorId: currentUser.id,
+            action: 'TRANSFER_POSTED',
+            resourceType: 'transfer',
+            resourceId: record.id,
+            details: {
+              sourceAccountId: record.sourceAccountId,
+              destinationAccountId: record.destinationAccountId,
+              amount: transferAmount.amountNumber,
+              currency: transferAmount.currency,
+              idempotencyKey: record.idempotencyKey,
+            },
+          },
+          tx,
+        );
+
+        return new Transfer({
+          id: record.id,
+          idempotencyKey: record.idempotencyKey,
+          requestHash: record.requestHash,
+          sourceAccountId: record.sourceAccountId,
+          destinationAccountId: record.destinationAccountId,
+          amount: Money.fromCents(record.amount, record.currency),
+          status: 'posted',
+          description: record.description,
+          completedAt: record.completedAt,
+        });
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -317,23 +336,7 @@ export class ExecuteTransferUseCase {
       throw error;
     }
 
-    const savedTransfer = transactionResult.transfer;
-    if (!transactionResult.replayed) {
-      await this.auditService.record({
-        action: 'TRANSFER_POSTED',
-        resourceType: 'transfer',
-        resourceId: savedTransfer.id,
-        details: {
-          sourceAccountId: savedTransfer.sourceAccountId,
-          destinationAccountId: savedTransfer.destinationAccountId,
-          amount: savedTransfer.amount.amountNumber,
-          currency: savedTransfer.amount.currency,
-          idempotencyKey: savedTransfer.idempotencyKey,
-        },
-      });
-    }
-
-    return this.toResponse(savedTransfer);
+    return this.toResponse(transactionResult);
   }
 
   private toResponse(transfer: Transfer): TransferResponse {
@@ -465,7 +468,11 @@ export class ReverseTransferUseCase {
     };
   }
 
-  async execute(transferId: string, dto: ReverseTransferRequest): Promise<TransferResponse> {
+  async execute(
+    transferId: string,
+    dto: ReverseTransferRequest,
+    auditContext: AuditRequestContext = {},
+  ): Promise<TransferResponse> {
     const requestHash = hashRequest({ transferId, reason: dto.reason });
     const replayExisting = async (record: {
       transferId: string;
@@ -504,7 +511,6 @@ export class ReverseTransferUseCase {
       throw new BadRequestException('Transfer has already been reversed');
     }
 
-    let replayed = false;
     try {
       await this.prisma.$transaction(async tx => {
         const transferRows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -534,7 +540,6 @@ export class ReverseTransferUseCase {
           if (priorReversal.idempotencyKey !== dto.idempotencyKey) {
             throw new BadRequestException('Transfer has already been reversed');
           }
-          replayed = true;
           return;
         }
 
@@ -670,6 +675,20 @@ export class ReverseTransferUseCase {
           },
           tx,
         );
+
+        await this.auditService.record(
+          {
+            ...auditContext,
+            action: 'TRANSFER_REVERSED',
+            resourceType: 'transfer',
+            resourceId: transferId,
+            details: {
+              reason: dto.reason,
+              amount: transferAmount.amountNumber,
+            },
+          },
+          tx,
+        );
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -686,18 +705,6 @@ export class ReverseTransferUseCase {
     const updated = await this.transferRepository.findById(transferId);
     if (!updated) {
       throw new NotFoundException(`Transfer ${transferId} not found after reversal`);
-    }
-
-    if (!replayed) {
-      await this.auditService.record({
-        action: 'TRANSFER_REVERSED',
-        resourceType: 'transfer',
-        resourceId: transferId,
-        details: {
-          reason: dto.reason,
-          amount: updated.amount.amountNumber,
-        },
-      });
     }
 
     return this.toResponse(updated);

@@ -8,6 +8,8 @@ import {
   HttpStatus,
   HttpCode,
   BadRequestException,
+  Headers,
+  Ip,
 } from '@nestjs/common';
 import {
   createAccountSchema,
@@ -26,6 +28,8 @@ import {
   ReconcileAccountUseCase,
 } from '../application/use-cases/account.use-cases';
 import { CurrentUser, Roles } from '../../auth/infrastructure/decorators/auth.decorators';
+import { createAuditRequestContext } from '../../audit/audit.service';
+import { CORRELATION_ID_HEADER } from '../../../common/middleware/correlation-id.middleware';
 
 @Controller('accounts')
 export class AccountsController {
@@ -40,12 +44,20 @@ export class AccountsController {
   @Post()
   @Roles('admin')
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() body: unknown): Promise<AccountResponse> {
+  async create(
+    @Body() body: unknown,
+    @CurrentUser() user: UserProfile,
+    @Ip() ipAddress: string,
+    @Headers(CORRELATION_ID_HEADER) correlationId?: string,
+  ): Promise<AccountResponse> {
     const parseResult = createAccountSchema.safeParse(body);
     if (!parseResult.success) {
       throw new BadRequestException(parseResult.error.format());
     }
-    return this.createAccountUseCase.execute(parseResult.data as CreateAccountRequest);
+    return this.createAccountUseCase.execute(
+      parseResult.data as CreateAccountRequest,
+      createAuditRequestContext(user.id, ipAddress, correlationId),
+    );
   }
 
   @Get()
@@ -67,12 +79,22 @@ export class AccountsController {
   @Post(':id/deposit')
   @Roles('admin')
   @HttpCode(HttpStatus.OK)
-  async deposit(@Param('id') id: string, @Body() body: unknown): Promise<AccountResponse> {
+  async deposit(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @CurrentUser() user: UserProfile,
+    @Ip() ipAddress: string,
+    @Headers(CORRELATION_ID_HEADER) correlationId?: string,
+  ): Promise<AccountResponse> {
     const parseResult = depositRequestSchema.safeParse(body);
     if (!parseResult.success) {
       throw new BadRequestException(parseResult.error.format());
     }
-    return this.depositFundsUseCase.execute(id, parseResult.data as DepositRequest);
+    return this.depositFundsUseCase.execute(
+      id,
+      parseResult.data as DepositRequest,
+      createAuditRequestContext(user.id, ipAddress, correlationId),
+    );
   }
 
   @Get(':id/reconcile')

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
 
 export interface AuditRecordParams {
@@ -8,7 +9,25 @@ export interface AuditRecordParams {
   resourceType: string;
   resourceId: string;
   ipAddress?: string | null | undefined;
+  correlationId?: string | null | undefined;
   details?: Record<string, unknown> | undefined;
+}
+
+export type AuditRequestContext = Pick<
+  AuditRecordParams,
+  'actorId' | 'ipAddress' | 'correlationId'
+>;
+
+export function createAuditRequestContext(
+  actorId: string,
+  ipAddress?: string,
+  correlationId?: string,
+): AuditRequestContext {
+  return {
+    actorId,
+    ipAddress: ipAddress ?? null,
+    correlationId: correlationId ?? null,
+  };
 }
 
 /**
@@ -20,19 +39,25 @@ export class AuditService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(params: AuditRecordParams): Promise<void> {
+  async record(params: AuditRecordParams, tx?: Prisma.TransactionClient): Promise<void> {
+    const data = {
+      id: randomUUID(),
+      actorId: params.actorId ?? null,
+      action: params.action,
+      resourceType: params.resourceType,
+      resourceId: params.resourceId,
+      ipAddress: params.ipAddress ?? null,
+      correlationId: params.correlationId ?? null,
+      details: params.details ? JSON.stringify(params.details) : null,
+    };
+
+    if (tx) {
+      await tx.auditLog.create({ data });
+      return;
+    }
+
     try {
-      await this.prisma.auditLog.create({
-        data: {
-          id: randomUUID(),
-          actorId: params.actorId ?? null,
-          action: params.action,
-          resourceType: params.resourceType,
-          resourceId: params.resourceId,
-          ipAddress: params.ipAddress ?? null,
-          details: params.details ? JSON.stringify(params.details) : null,
-        },
-      });
+      await this.prisma.auditLog.create({ data });
       this.logger.log(
         `Audit recorded: [${params.action}] on ${params.resourceType} ${params.resourceId}`,
       );

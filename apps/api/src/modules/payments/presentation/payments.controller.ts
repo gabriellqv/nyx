@@ -8,6 +8,8 @@ import {
   HttpStatus,
   HttpCode,
   BadRequestException,
+  Headers,
+  Ip,
 } from '@nestjs/common';
 import {
   createPaymentSchema,
@@ -21,6 +23,8 @@ import {
   ListPaymentsUseCase,
 } from '../application/use-cases/payment.use-cases';
 import { CurrentUser, Roles } from '../../auth/infrastructure/decorators/auth.decorators';
+import { createAuditRequestContext } from '../../audit/audit.service';
+import { CORRELATION_ID_HEADER } from '../../../common/middleware/correlation-id.middleware';
 
 @Controller('payments')
 export class PaymentsController {
@@ -33,12 +37,20 @@ export class PaymentsController {
   @Post()
   @Roles('admin')
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() body: unknown): Promise<PaymentResponse> {
+  async create(
+    @Body() body: unknown,
+    @CurrentUser() user: UserProfile,
+    @Ip() ipAddress: string,
+    @Headers(CORRELATION_ID_HEADER) correlationId?: string,
+  ): Promise<PaymentResponse> {
     const parseResult = createPaymentSchema.safeParse(body);
     if (!parseResult.success) {
       throw new BadRequestException(parseResult.error.format());
     }
-    return this.processPaymentUseCase.execute(parseResult.data as CreatePaymentRequest);
+    return this.processPaymentUseCase.execute(
+      parseResult.data as CreatePaymentRequest,
+      createAuditRequestContext(user.id, ipAddress, correlationId),
+    );
   }
 
   @Get(':id')

@@ -16,6 +16,7 @@ import { OutboxService } from '../../../outbox/outbox.service';
 import { assertCanReadCustomer } from '../../../auth/application/policies/resource-access.policy';
 import { DoubleEntryLedgerService } from '../../../ledger/domain/services/double-entry.service';
 import { hashRequest, isUniqueConstraintError } from '../../../common/application/request-hash';
+import { AuditRequestContext } from '../../../audit/audit.service';
 
 interface LockedAccountRow {
   id: string;
@@ -38,7 +39,10 @@ export class ProcessPaymentUseCase {
     private readonly doubleEntryService: DoubleEntryLedgerService,
   ) {}
 
-  async execute(dto: CreatePaymentRequest): Promise<PaymentResponse> {
+  async execute(
+    dto: CreatePaymentRequest,
+    auditContext: AuditRequestContext = {},
+  ): Promise<PaymentResponse> {
     const requestHash = hashRequest({
       destinationAccountId: dto.destinationAccountId,
       amount: dto.amount,
@@ -74,7 +78,7 @@ export class ProcessPaymentUseCase {
     const paymentId = randomUUID();
 
     // 2. Process payment atomically inside database transaction
-    let transactionResult: { payment: Payment; replayed: boolean };
+    let transactionResult: Payment;
     try {
       transactionResult = await this.prisma.$transaction(async tx => {
         // Row lock on destination account
@@ -114,7 +118,7 @@ export class ProcessPaymentUseCase {
               `Idempotency key "${dto.idempotencyKey}" already exists with different payment parameters`,
             );
           }
-          return { payment: duplicatePayment, replayed: true };
+          return duplicatePayment;
         }
 
         if (accountRow.status !== 'active') {
@@ -215,21 +219,35 @@ export class ProcessPaymentUseCase {
           tx,
         );
 
-        return {
-          payment: new Payment({
-            id: rawPayment.id,
-            idempotencyKey: rawPayment.idempotencyKey,
-            requestHash: rawPayment.requestHash,
-            destinationAccountId: rawPayment.destinationAccountId,
-            amount: paymentAmount,
-            method: dto.method,
-            status: 'completed',
-            description: rawPayment.description,
-            createdAt: rawPayment.createdAt,
-            completedAt: rawPayment.completedAt,
-          }),
-          replayed: false,
-        };
+        await this.auditService.record(
+          {
+            ...auditContext,
+            action: 'PAYMENT_PROCESSED',
+            resourceType: 'payment',
+            resourceId: paymentId,
+            details: {
+              destinationAccountId: accountRow.id,
+              amount: paymentAmount.amountNumber,
+              currency: paymentAmount.currency,
+              method: dto.method,
+              idempotencyKey: dto.idempotencyKey,
+            },
+          },
+          tx,
+        );
+
+        return new Payment({
+          id: rawPayment.id,
+          idempotencyKey: rawPayment.idempotencyKey,
+          requestHash: rawPayment.requestHash,
+          destinationAccountId: rawPayment.destinationAccountId,
+          amount: paymentAmount,
+          method: dto.method,
+          status: 'completed',
+          description: rawPayment.description,
+          createdAt: rawPayment.createdAt,
+          completedAt: rawPayment.completedAt,
+        });
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -246,21 +264,7 @@ export class ProcessPaymentUseCase {
       throw error;
     }
 
-    const savedPayment = transactionResult.payment;
-    if (!transactionResult.replayed) {
-      await this.auditService.record({
-        action: 'PAYMENT_PROCESSED',
-        resourceType: 'payment',
-        resourceId: savedPayment.id,
-        details: {
-          destinationAccountId: savedPayment.destinationAccountId,
-          amount: savedPayment.amount.amountNumber,
-          currency: savedPayment.amount.currency,
-          method: savedPayment.method,
-          idempotencyKey: savedPayment.idempotencyKey,
-        },
-      });
-    }
+    const savedPayment = transactionResult;
 
     return this.toResponse(savedPayment);
   }
