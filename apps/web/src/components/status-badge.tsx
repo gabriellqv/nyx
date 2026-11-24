@@ -2,30 +2,67 @@ import React from 'react';
 import type { HealthStatus } from '@nyx/contracts';
 import { cn } from '../lib/utils';
 
+export type ExtendedStatus = HealthStatus | 'settled' | 'pending' | 'balanced' | 'discrepant';
+
 interface StatusBadgeProps {
-  status: HealthStatus;
+  status: ExtendedStatus;
   label?: string;
+  className?: string;
 }
 
 /**
- * Visual status badge displaying operational states.
+ * Visual operational status badge.
  */
-export function StatusBadge({ status, label }: StatusBadgeProps): React.JSX.Element {
-  const statusStyles: Record<HealthStatus, { bg: string; text: string; dot: string }> = {
+export function StatusBadge({
+  status,
+  label,
+  className = '',
+}: StatusBadgeProps): React.JSX.Element {
+  const statusStyles: Record<
+    ExtendedStatus,
+    { bg: string; text: string; dot: string; defaultLabel: string }
+  > = {
     ok: {
-      bg: 'bg-nyx-card border-nyx-border',
-      text: 'text-nyx-highlight',
-      dot: 'bg-nyx-highlight',
+      bg: 'bg-[#191b35] border-[#302c45]',
+      text: 'text-[#b8a5e8]',
+      dot: 'bg-[#b8a5e8]',
+      defaultLabel: 'Operational',
+    },
+    balanced: {
+      bg: 'bg-[#142328] border-[#224840]',
+      text: 'text-[#4ade80]',
+      dot: 'bg-[#4ade80]',
+      defaultLabel: 'Balanced',
+    },
+    settled: {
+      bg: 'bg-[#142328] border-[#224840]',
+      text: 'text-[#4ade80]',
+      dot: 'bg-[#4ade80]',
+      defaultLabel: 'Settled',
+    },
+    pending: {
+      bg: 'bg-[#292218] border-[#523d24]',
+      text: 'text-[#fbbf24]',
+      dot: 'bg-[#d97706]',
+      defaultLabel: 'Pending',
     },
     degraded: {
-      bg: 'bg-[#252238] border-[#4a4266]',
-      text: 'text-[#d4c7f5]',
-      dot: 'bg-[#9d84d6]',
+      bg: 'bg-[#261e2f] border-[#4a365f]',
+      text: 'text-[#d8b4fe]',
+      dot: 'bg-[#b8a5e8]',
+      defaultLabel: 'Degraded',
     },
     error: {
-      bg: 'bg-[#2a1b2e] border-[#5e2b4e]',
-      text: 'text-[#f2a8c9]',
-      dot: 'bg-[#e65c8a]',
+      bg: 'bg-[#2d1622] border-[#5e223f]',
+      text: 'text-[#f87171]',
+      dot: 'bg-[#e11d48]',
+      defaultLabel: 'Error',
+    },
+    discrepant: {
+      bg: 'bg-[#2d1622] border-[#5e223f]',
+      text: 'text-[#f87171]',
+      dot: 'bg-[#e11d48]',
+      defaultLabel: 'Discrepant',
     },
   };
 
@@ -34,13 +71,14 @@ export function StatusBadge({ status, label }: StatusBadgeProps): React.JSX.Elem
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border',
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium border',
         current.bg,
         current.text,
+        className,
       )}
     >
-      <span className={cn('h-1.5 w-1.5 rounded-full', current.dot)} />
-      {label ?? status.toUpperCase()}
+      <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', current.dot)} />
+      <span>{label ?? current.defaultLabel}</span>
     </span>
   );
 }
